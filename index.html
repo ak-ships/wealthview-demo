@@ -1,0 +1,3243 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WealthView — Moroccan Markets Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.6/chart.umd.min.js"></script>
+  <script>
+    // Fallback CDNs if primary fails
+    if (typeof Chart === "undefined") { document.write('<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"><\/script>'); }
+  </script>
+  <script>
+    if (typeof Chart === "undefined") { document.write('<script src="https://unpkg.com/chart.js@4.4.6/dist/chart.umd.min.js"><\/script>'); }
+  </script>
+  <!-- TradingView charting library — loaded once, reused for all modal charts -->
+  <script src="https://s3.tradingview.com/tv.js"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      scrollbar-width: thin;
+      scrollbar-color: #3d444d #060910;
+    }
+    *::-webkit-scrollbar { width: 6px; }
+    *::-webkit-scrollbar-track { background: #060910; }
+    *::-webkit-scrollbar-thumb { background: #3d444d; border-radius: 3px; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #060910;
+      background-image:
+        linear-gradient(rgba(0,212,255,0.015) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,212,255,0.015) 1px, transparent 1px);
+      background-size: 50px 50px;
+      color: #e6edf3;
+      min-height: 100vh;
+    }
+
+    @keyframes pulse-glow {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    @keyframes value-flash {
+      0%   { background: rgba(0,212,255,0.25); border-radius: 3px; }
+      100% { background: transparent; }
+    }
+
+    .flashed { animation: value-flash 0.8s ease-out; }
+
+    .loading-val {
+      color: #3d444d;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+    }
+
+    #data-source {
+      font-size: 9px;
+      font-family: 'JetBrains Mono', monospace;
+      padding: 3px 8px;
+      border-radius: 4px;
+      border: 1px solid;
+      transition: color 0.3s, background 0.3s;
+    }
+
+    #data-source.tv   { color: #00d4ff; border-color: rgba(0,212,255,0.3); background: rgba(0,212,255,0.05); }
+    #data-source.yhoo { color: #f0a500; border-color: rgba(240,165,0,0.3);  background: rgba(240,165,0,0.05); }
+    #data-source.none { color: #ff4757; border-color: rgba(255,71,87,0.3);  background: rgba(255,71,87,0.05); }
+
+    /* Pulsing "live" dot for the WebSocket RT badge */
+    @keyframes live-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.4; transform: scale(0.85); }
+    }
+    #data-source.tv .live-dot {
+      display: inline-block;
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: #00d4ff;
+      margin-right: 4px;
+      animation: live-pulse 1.4s ease-in-out infinite;
+      vertical-align: middle;
+    }
+
+    header {
+      padding: 16px 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid rgba(0,212,255,0.08);
+      background: linear-gradient(135deg, rgba(0,212,255,0.03) 0%, transparent 50%, rgba(240,165,0,0.02) 100%);
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .logo-box {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,212,255,0.12);
+      border: 1px solid rgba(0,212,255,0.3);
+      box-shadow: 0 0 12px rgba(0,212,255,0.35);
+    }
+
+    .logo-title {
+      font-size: 18px;
+      font-weight: 800;
+      font-family: 'JetBrains Mono', monospace;
+      letter-spacing: 3px;
+      background: linear-gradient(90deg, #00d4ff, #f0a500);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .logo-subtitle {
+      font-size: 9px;
+      color: #8b949e;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      margin-top: 1px;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .pulse-dot {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #00e676;
+      box-shadow: 0 0 8px #00e676;
+      animation: pulse-glow 2s infinite;
+    }
+
+    .clock {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      font-weight: 600;
+      color: #e6edf3;
+      background: rgba(0,0,0,0.3);
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: 1px solid rgba(0,212,255,0.08);
+    }
+
+    nav {
+      display: flex;
+      gap: 4px;
+      padding: 12px 32px;
+      border-bottom: 1px solid rgba(0,212,255,0.08);
+      background: rgba(0,0,0,0.2);
+      overflow-x: auto;
+    }
+
+    .nav-btn {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 9px 18px;
+      border-radius: 8px;
+      cursor: pointer;
+      border: 1px solid transparent;
+      background: transparent;
+      color: #3d444d;
+      font-size: 12px;
+      font-weight: 500;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+
+    .nav-btn.active {
+      border: 1px solid rgba(0,212,255,0.25);
+      background: rgba(0,212,255,0.06);
+      color: #00d4ff;
+      font-weight: 700;
+      box-shadow: 0 0 15px rgba(0,212,255,0.1);
+    }
+
+    main {
+      padding: 20px 28px;
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+
+    .section { display: none; }
+    .section.active { display: block; }
+
+    .hud-card {
+      background: rgba(13,17,23,0.92);
+      border: 1px solid rgba(0,212,255,0.08);
+      border-radius: 14px;
+      padding: 18px 20px;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 0 20px rgba(0,212,255,0.05);
+      transition: all 0.25s ease;
+      margin-bottom: 16px;
+    }
+
+    .hud-card:hover {
+      border: 1px solid rgba(0,212,255,0.22);
+      box-shadow: 0 0 30px rgba(0,212,255,0.1);
+    }
+
+    .hud-card.clickable {
+      cursor: pointer;
+    }
+
+    .label {
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #8b949e;
+      font-family: 'Inter', sans-serif;
+    }
+
+    .value {
+      font-size: 22px;
+      font-weight: 800;
+      font-family: 'JetBrains Mono', monospace;
+      color: #e6edf3;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    thead tr {
+      border-bottom: 1px solid rgba(0,212,255,0.08);
+      background: rgba(0,0,0,0.2);
+    }
+
+    th {
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #8b949e;
+      padding: 10px 16px;
+      text-align: left;
+    }
+
+    tbody tr {
+      border-bottom: 1px solid rgba(0,212,255,0.08);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    tbody tr:hover {
+      background: rgba(0,212,255,0.04);
+    }
+
+    td {
+      padding: 12px 16px;
+      font-size: 13px;
+      color: #e6edf3;
+    }
+
+    td.mono {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .grid-4 {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    .markets-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .market-panel {
+      margin-bottom: 0;
+    }
+
+    .market-panel .table-header {
+      margin-bottom: 10px;
+      padding-bottom: 10px;
+    }
+
+    .market-panel .table-header span {
+      font-size: 12px;
+    }
+
+    .market-panel table th {
+      font-size: 8px;
+      padding: 7px 10px;
+      white-space: nowrap;
+    }
+
+    .market-panel table td {
+      font-size: 12px;
+      padding: 8px 10px;
+      white-space: nowrap;
+    }
+
+    /* Forex panel has 7 columns — slightly tighter */
+    #forex-tbody tr td {
+      font-size: 11px;
+      padding: 7px 7px;
+    }
+    #forex-tbody tr td:first-child {
+      font-size: 12px;
+    }
+
+    .table-scroll {
+      max-height: 320px;
+      overflow-y: auto;
+    }
+
+    .stat-badge {
+      background: rgba(0,0,0,0.3);
+      border-radius: 10px;
+      padding: 10px 14px;
+      border: 1px solid rgba(0,212,255,0.1);
+      min-width: 100px;
+    }
+
+    .stat-badge .label { margin-bottom: 2px; }
+    .stat-badge .value { font-size: 18px; margin-top: 2px; }
+
+    .table-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+      padding: 0 0 16px 0;
+      border-bottom: 1px solid rgba(0,212,255,0.08);
+    }
+
+    .table-header span {
+      font-weight: 700;
+      font-size: 14px;
+      color: #e6edf3;
+    }
+
+    input[type="number"],
+    input[type="text"] {
+      -moz-appearance: textfield;
+      font-family: 'JetBrains Mono', monospace;
+      background: rgba(0,0,0,0.3);
+      border: 1px solid rgba(0,212,255,0.08);
+      border-radius: 6px;
+      color: #e6edf3;
+      padding: 8px 12px;
+      font-size: 13px;
+      outline: none;
+      transition: all 0.2s;
+    }
+
+    input[type="number"]:focus,
+    input[type="text"]:focus {
+      border-color: rgba(0,212,255,0.3);
+      box-shadow: 0 0 12px rgba(0,212,255,0.15);
+    }
+
+    input[type="number"]::-webkit-inner-spin-button,
+    input[type="number"]::-webkit-outer-spin-button {
+      -webkit-appearance: none;
+    }
+
+    /* Hide spinner on allocation % inputs */
+    input[type="number"][data-alloc-pct]::-webkit-inner-spin-button,
+    input[type="number"][data-alloc-pct]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type="number"][data-alloc-pct] { -moz-appearance: textfield; }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 4px;
+      border-radius: 2px;
+      background: rgba(0,212,255,0.08);
+      outline: none;
+      cursor: pointer;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #00d4ff;
+      cursor: pointer;
+      box-shadow: 0 0 8px rgba(0,212,255,0.3);
+    }
+
+    input[type="range"]::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #00d4ff;
+      cursor: pointer;
+      box-shadow: 0 0 8px rgba(0,212,255,0.3);
+      border: none;
+    }
+
+    /* Profile CSS removed (section supprimée) */
+
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      backdrop-filter: blur(8px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      display: none;
+    }
+
+    .modal-overlay.active {
+      display: flex;
+    }
+
+    .modal-content {
+      width: 90vw;
+      height: 82vh;
+      background: rgba(13,17,23,0.92);
+      border-radius: 18px;
+      border: 1px solid rgba(0,212,255,0.22);
+      box-shadow: 0 0 60px rgba(0,212,255,0.1);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 20px;
+      border-bottom: 1px solid rgba(0,212,255,0.08);
+      flex-shrink: 0;
+    }
+
+    .modal-header-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .modal-header-right {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .tv-link {
+      font-size: 10px;
+      color: #00d4ff;
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 5px 10px;
+      border-radius: 6px;
+      border: 1px solid rgba(0,212,255,0.3);
+      background: rgba(0,212,255,0.08);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .tv-link:hover {
+      background: rgba(0,212,255,0.15);
+      border-color: rgba(0,212,255,0.5);
+    }
+
+    .close-btn {
+      background: rgba(255,71,87,0.1);
+      border: 1px solid rgba(255,71,87,0.2);
+      border-radius: 8px;
+      padding: 6px 8px;
+      cursor: pointer;
+      display: flex;
+      color: #ff4757;
+      transition: all 0.2s;
+    }
+
+    .close-btn:hover {
+      background: rgba(255,71,87,0.2);
+    }
+
+    .modal-body {
+      flex: 1;
+      width: 100%;
+      overflow: hidden;
+    }
+
+    .chart-container {
+      width: 100%;
+      height: 100%;
+      position: relative;
+    }
+
+    footer {
+      padding: 12px 32px;
+      border-top: 1px solid rgba(0,212,255,0.08);
+      text-align: center;
+      font-size: 9px;
+      color: #3d444d;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .stock-badge {
+      width: 34px; height: 34px; border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 10px; font-weight: 800; letter-spacing: 0.5px;
+      font-family: 'JetBrains Mono', monospace;
+      flex-shrink: 0;
+    }
+    .stock-badge-img {
+      width: 34px; height: 34px; border-radius: 50%;
+      object-fit: contain; flex-shrink: 0;
+      background: #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    }
+    .commodity-icon, .forex-icon {
+      width: 30px; height: 30px; border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 700;
+      flex-shrink: 0;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    }
+
+    .chart-wrapper {
+      width: 100%;
+      position: relative;
+      height: 300px;
+      margin-top: 12px;
+    }
+
+    .chart-wrapper-200 {
+      width: 100%;
+      position: relative;
+      height: 220px;
+    }
+
+    .chart-wrapper-260 {
+      width: 100%;
+      position: relative;
+      height: 280px;
+    }
+
+    .chart-wrapper-220 {
+      width: 100%;
+      position: relative;
+      height: 220px;
+    }
+
+    .chart-wrapper canvas,
+    .chart-wrapper-200 canvas,
+    .chart-wrapper-220 canvas,
+    .chart-wrapper-260 canvas {
+      width: 100% !important;
+      height: 100% !important;
+    }
+  </style>
+</head>
+<body>
+  <!-- HEADER -->
+  <header>
+    <div class="header-left">
+      <div class="logo-box">WV</div>
+      <div>
+        <div class="logo-title">WEALTHVIEW</div>
+        <div class="logo-subtitle">Moroccan Markets Dashboard · Public Demo</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="status">
+        <div class="pulse-dot"></div>
+        <span style="font-size: 10px; color: #8b949e; font-family: 'JetBrains Mono', monospace;">LIVE</span>
+      </div>
+      <span id="data-source" class="none" style="display:none;">—</span>
+      <span id="last-update" style="font-size: 9px; color: #3d444d; font-family: 'JetBrains Mono', monospace;"></span>
+      <div class="clock" id="clock">12:00:00</div>
+    </div>
+  </header>
+
+  <!-- NAVIGATION -->
+  <nav id="nav-tabs">
+    <button class="nav-btn active" data-tab="markets">Marchés</button>
+    <button class="nav-btn" data-tab="bonds">Obligations</button>
+  </nav>
+
+  <!-- MAIN CONTENT -->
+  <main>
+    <!-- MARKETS (ALL-IN-ONE) -->
+    <section id="markets" class="section active">
+      <div class="markets-grid">
+        <!-- INDICES -->
+        <div class="hud-card market-panel">
+          <div class="table-header">
+            <span>Indices Boursiers</span>
+            <div class="pulse-dot"></div>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Indice</th>
+                  <th>Cours</th>
+                  <th style="text-align:right;">Jour</th>
+                  <th style="text-align:right;">1 Sem</th>
+                  <th style="text-align:right;">YTD</th>
+                  <th style="width:24px;"></th>
+                </tr>
+              </thead>
+              <tbody id="indices-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- FOREX -->
+        <div class="hud-card market-panel">
+          <div class="table-header">
+            <span>Devises / MAD</span>
+            <div class="pulse-dot"></div>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Paire</th>
+                  <th>Cours</th>
+                  <th style="text-align:right;">Jour</th>
+                  <th style="text-align:right;">1 Sem</th>
+                  <th style="text-align:right;">1 Mois</th>
+                  <th style="text-align:right;">3 Mois</th>
+                  <th style="text-align:center; min-width:90px;">Signal MAD</th>
+                </tr>
+              </thead>
+              <tbody id="forex-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- STOCKS -->
+        <div class="hud-card market-panel">
+          <div class="table-header">
+            <span>Top 20 Pondération MASI — Bourse de Casablanca</span>
+            <div class="pulse-dot"></div>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Valeur</th>
+                  <th style="text-align: right;">Cours</th>
+                  <th style="text-align: right;">Jour</th>
+                  <th style="text-align: right;">YTD</th>
+                  <th style="width: 24px;"></th>
+                </tr>
+              </thead>
+              <tbody id="stocks-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- COMMODITIES -->
+        <div class="hud-card market-panel">
+          <div class="table-header">
+            <span>Matières Premières</span>
+            <div class="pulse-dot"></div>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Matière</th>
+                  <th style="text-align:right;">Cours</th>
+                  <th style="text-align:right;">Jour</th>
+                  <th style="text-align:right;">1 Sem</th>
+                  <th style="text-align:right;">1 Mois</th>
+                  <th style="text-align:right;">Unité</th>
+                  <th style="width:24px;"></th>
+                </tr>
+              </thead>
+              <tbody id="commodities-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ════════════════════════════════════════════════════════════
+           BDT YIELD CURVE — in Marchés tab
+           ════════════════════════════════════════════════════════ -->
+      <div class="hud-card" style="margin-top:14px;">
+        <div class="table-header" style="margin-bottom:10px;">
+          <span>Courbe des Taux BDT — Adjudications Bank Al-Maghrib</span>
+          <div style="display:flex;align-items:center;gap:16px;">
+            <div style="display:flex;align-items:center;gap:5px;">
+              <span style="display:inline-block;width:22px;height:2px;background:#00d4ff;border-radius:1px;"></span>
+              <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:#00d4ff;">Aujourd'hui</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:5px;">
+              <span style="display:inline-block;width:22px;height:2px;background:#f0a500;border-radius:1px;border-top:1px dashed #f0a500;"></span>
+              <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:#f0a500;">Il y a 3 mois</span>
+            </div>
+            <div class="pulse-dot" id="bdt-curve-dot" style="opacity:0.5;"></div>
+          </div>
+        </div>
+        <div style="position:relative;height:220px;">
+          <canvas id="bdt-markets-chart" style="position:absolute;top:0;left:0;width:100%;height:100%;display:block;"></canvas>
+        </div>
+        <div id="bdt-curve-source" style="font-size:9px;font-family:'JetBrains Mono',monospace;color:#3d444d;text-align:right;padding-top:4px;">Source: référence BAM — en attente mise à jour</div>
+      </div>
+
+      <!-- ════════════════════════════════════════════════════════════
+           ÉMISSION vs SECONDAIRE — Comparison Chart
+           ════════════════════════════════════════════════════════ -->
+      <div class="hud-card" style="margin-top:14px;">
+        <div class="table-header" style="margin-bottom:10px;">
+          <span>Courbe des Taux — Marché Secondaire (Aujourd'hui vs -3 mois)</span>
+          <div style="display:flex;align-items:center;gap:16px;">
+            <div style="display:flex;align-items:center;gap:5px;">
+              <span style="display:inline-block;width:22px;height:3px;background:#00d4ff;border-radius:1px;"></span>
+              <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:#00d4ff;">Secondaire</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:5px;">
+              <span style="display:inline-block;width:22px;height:2px;background:#f0a500;border-radius:1px;border-top:1px dashed #f0a500;"></span>
+              <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:#f0a500;">Secondaire -3 mois</span>
+            </div>
+            <div class="pulse-dot" id="emission-curve-dot" style="opacity:0.5;"></div>
+          </div>
+        </div>
+        <div style="position:relative;height:220px;">
+          <canvas id="emission-vs-secondary-chart" style="position:absolute;top:0;left:0;width:100%;height:100%;display:block;"></canvas>
+        </div>
+        <!-- Spread indicator bar -->
+        <div id="emission-spread-bar" style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 0 2px;"></div>
+        <div id="emission-analysis" style="font-size:10px;font-family:'JetBrains Mono',monospace;color:#8b949e;padding:4px 0 0;line-height:1.6;"></div>
+        <div id="emission-curve-source" style="font-size:9px;font-family:'JetBrains Mono',monospace;color:#3d444d;text-align:right;padding-top:4px;">Source: BAM adjudications + marché secondaire</div>
+      </div>
+
+      <!-- ════════════════════════════════════════════════════════════
+           BDT TABLE
+           ════════════════════════════════════════════════════════ -->
+      <div style="margin-top:14px;">
+        <div class="hud-card market-panel">
+          <div class="table-header">
+            <span>Taux BDT en direct</span>
+            <div class="pulse-dot" id="bdt-table-dot" style="opacity:0.5;"></div>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Maturité</th>
+                  <th style="text-align:right;">Taux (%)</th>
+                  <th style="text-align:right;">vs 3 mois</th>
+                  <th style="text-align:right;">Durée</th>
+                </tr>
+              </thead>
+              <tbody id="bdt-markets-tbody"></tbody>
+            </table>
+          </div>
+          <div id="bdt-markets-source" style="font-size:9px;font-family:'JetBrains Mono',monospace;color:#3d444d;padding:6px 0 2px;text-align:right;">Source: référence statique</div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- BONDS TAB -->
+    <section id="bonds" class="section">
+      <div class="grid-2">
+        <div class="hud-card">
+          <div class="table-header">
+            <span>Bons du Trésor Marocains</span>
+            <div id="bonds-source-dot" class="pulse-dot" title="Fetch BAM taux de référence en cours…"></div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Maturité</th>
+                <th style="text-align:right;">TAUX EN DIRECT</th>
+                <th style="text-align:right;">VARIATION</th>
+                <th style="text-align:right;">DURÉE</th>
+              </tr>
+            </thead>
+            <tbody id="bonds-tbody"></tbody>
+          </table>
+          <div id="bonds-source-label" style="font-size:9px;font-family:'JetBrains Mono',monospace;color:#3d444d;padding:6px 0 2px;text-align:right;">Source: référence statique</div>
+        </div>
+
+        <div class="hud-card">
+          <div class="table-header">
+            <span>Courbe des Taux — Trésor Marocain</span>
+          </div>
+          <div class="chart-wrapper">
+            <canvas id="bonds-chart"></canvas>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- PROFILES TAB supprimé -->
+  </main>
+
+  <!-- FOOTER -->
+  <footer style="text-align:center;padding:14px;color:#6e7681;font-size:10px;font-family:'JetBrains Mono',monospace;border-top:1px solid rgba(0,212,255,0.08);margin-top:24px;line-height:1.7;">
+    WEALTHVIEW · Public Demo · Data shown for informational purposes only.<br>
+    Market data sourced from public providers (TradingView, bourse.ma, Bank Al-Maghrib, Yahoo Finance).<br>
+    Company logos are property of their respective owners and used solely for ticker identification (nominative fair use).<br>
+    Not affiliated with, and not endorsed by, any company displayed.
+  </footer>
+
+  <!-- TV MODAL -->
+  <div class="modal-overlay" id="tv-modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div class="modal-header-left">
+          <span style="font-family: 'JetBrains Mono', monospace; font-weight: 700; color: #e6edf3; font-size: 14px;" id="modal-symbol">SYMBOL</span>
+        </div>
+        <div class="modal-header-right">
+          <a class="tv-link" id="tv-link" target="_blank">Ouvrir TradingView</a>
+          <button class="close-btn" onclick="closeModal()">×</button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div class="chart-container" id="tv-container"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ════════════════════════════════════════════════════════════════
+    // THEME & CONSTANTS
+    // ════════════════════════════════════════════════════════════════
+    const T = {
+      accent: "#00d4ff", gold: "#f0a500", red: "#ff4757", green: "#00e676",
+      textSec: "#8b949e", textMut: "#3d444d",
+    };
+
+    // TV_MAP: SCANNER API symbols (TradingView Scanner endpoint)
+    // All commodities use futures symbols — "futures" market returns data for all four.
+    // Indices/Forex use their own exchange symbols.
+    const TV_MAP = {
+      // ─── Indices ─────────────────────────────────────────────────────────
+      "^MASI":"CSEMA:MASI",
+      "^FCHI":"TVC:CAC40",      // TVC:CAC40 = free embed (EURONEXT:PX1 is paid)
+      "^GSPC":"SP:SPX",
+      // ─── Commodities: OANDA spot CFDs + TVC index — same symbols as chart widget ──
+      // Using spot/CFD symbols ensures table price = chart price (no futures basis gap).
+      "GC=F":"OANDA:XAUUSD",  // Gold   spot  (was COMEX:GC1! futures — different price!)
+      "BZ=F":"OANDA:BCOUSD",  // Brent  spot  (was NYMEX:BZ1! futures)
+      "SI=F":"OANDA:XAGUSD",  // Silver spot  (was COMEX:SI1! futures)
+      "ZW=F":"CBOT:ZW1!",     // Wheat futures contract — vrai contrat CBOT
+      // ─── Bonds ───────────────────────────────────────────────────────────
+      "^TNX":"TVC:US10Y",
+      // ─── Forex ───────────────────────────────────────────────────────────
+      "EURMAD=X":"FX_IDC:EURMAD",
+      "MAD=X":"FX_IDC:USDMAD",
+      "GBPMAD=X":"FX_IDC:GBPMAD",
+      "CHFMAD=X":"FX_IDC:CHFMAD",
+      "CADMAD=X":"FX_IDC:CADMAD",
+      // ─── Moroccan stocks — Top 20 Pondération MASI par capitalisation flottante ───────────
+      "ATW.CA":"CSEMA:ATW","IAM.CA":"CSEMA:IAM","MNG.CA":"CSEMA:MNG","BCP.CA":"CSEMA:BCP",
+      "MDP.CA":"CSEMA:MDP","BOA.CA":"CSEMA:BOA","LHM.CA":"CSEMA:LHM","TQM.CA":"CSEMA:TQM",
+      "CMA.CA":"CSEMA:CMA","CSR.CA":"CSEMA:CSR","LBV.CA":"CSEMA:LBV","TGC.CA":"CSEMA:TGC",
+      "WAA.CA":"CSEMA:WAA","CIH.CA":"CSEMA:CIH","AKT.CA":"CSEMA:AKT","ADH.CA":"CSEMA:ADH",
+      "ALI.CA":"CSEMA:ADI","GAZ.CA":"CSEMA:GAZ","GTM.CA":"CSEMA:GTM","HPS.CA":"CSEMA:HPS",
+    };
+
+    // TV_CHART_MAP: EMBEDDED WIDGET symbols (must be freely embeddable — no subscription).
+    // OANDA broker CFDs embed freely. CBOT:ZW1! is le vrai contrat blé.
+    // FOREXCOM:SPXUSD is a free CFD tracking S&P 500 exactly.
+    const TV_CHART_MAP = {
+      // Commodities: OANDA broker spot CFDs → free to embed, track futures closely
+      "GC=F":  "OANDA:XAUUSD",    // Gold spot    — free embed
+      "BZ=F":  "OANDA:BCOUSD",    // Brent crude  — free embed
+      "SI=F":  "OANDA:XAGUSD",    // Silver spot  — free embed
+      "ZW=F":  "CBOT:ZW1!",       // Wheat futures — vrai contrat CBOT
+      // Indices: SP:SPX requires premium to embed — use free FOREXCOM CFD instead
+      "^GSPC": "FOREXCOM:SPXUSD", // S&P 500 via FOREXCOM CFD — free embed, tracks SP:SPX exactly
+      "^FCHI": "FOREXCOM:FRA40",  // CAC 40  via FOREXCOM CFD — free embed, tracks TVC:CAC40 exactly
+    };
+
+    // ── Yahoo Finance symbol map (for Lightweight Charts historical data) ──────
+    // Moroccan stocks: Yahoo Finance uses .CS suffix for Casablanca Stock Exchange
+    // Commodities: we use the nearest spot-equivalent Yahoo symbol to stay consistent
+    // with the chart (OANDA spot CFDs). Gold futures (GC=F) trade ~$5-20 above spot.
+    // Yahoo has no direct OANDA symbols, so we use the closest Yahoo spot equivalents.
+    const YAHOO_HIST_MAP = {
+      // Indices
+      "^MASI":"^MASI",   "^FCHI":"^FCHI",   "^GSPC":"^GSPC",
+      // Commodities — keep futures symbols for Yahoo fallback (closest available on Yahoo)
+      // Note: small premium vs spot (~0.1-0.5%) accepted in Yahoo fallback path only.
+      "GC=F":"GC=F",     "BZ=F":"BZ=F",     "SI=F":"SI=F",     "ZW=F":"ZW=F",
+      // Bonds
+      "^TNX":"^TNX",
+      // Moroccan stocks — Top 20 Pondération MASI — Casablanca Exchange suffix on Yahoo Finance
+      "ATW.CA":"ATW.CS", "IAM.CA":"IAM.CS", "MNG.CA":"MNG.CS", "BCP.CA":"BCP.CS",
+      "MDP.CA":"MDP.CS", "BOA.CA":"BOA.CS", "LHM.CA":"LHM.CS", "TQM.CA":"TQM.CS",
+      "CMA.CA":"CMA.CS", "CSR.CA":"CSR.CS", "LBV.CA":"LBV.CS", "TGC.CA":"TGC.CS",
+      "WAA.CA":"WAA.CS", "CIH.CA":"CIH.CS", "AKT.CA":"AKT.CS", "ADH.CA":"ADH.CS",
+      "ALI.CA":"ADI.CS", "GAZ.CA":"GAZ.CS", "GTM.CA":"GTM.CS", "HPS.CA":"HPS.CS",
+      // Forex (Yahoo Finance FX format)
+      "EURMAD=X":"EURMAD=X","MAD=X":"MAD=X","GBPMAD=X":"GBPMAD=X","CHFMAD=X":"CHFMAD=X","CADMAD=X":"CADMAD=X",
+    };
+
+    // ── Stock logos — HD loader (v2.0.5 Avril 2026) ──────────────────────────
+    // Strategy: 3-tier fallback, with 6 Moroccan companies (BCP, Marsa Maroc,
+    // TAQA, Wafa Assurance, Afriquia Gaz, HPS) using hand-crafted embedded SVG
+    // wordmarks with authentic brand colors as their primary logo. This fixes
+    // the "BCP = Banque Populaire France" confusion and the missing/pixelated
+    // logos — 100% offline, vector-crisp at any DPR, guaranteed correct brand.
+    //
+    // For the other 14 companies Clearbit 128px is tried first; on error we
+    // fall through to wsrv.nl favicon proxy (128x128), then to a colored
+    // initials badge. The chain is implemented in stockLogoErr() using the
+    // data-fb attribute.
+    const STOCK_LOGO = {
+      "ATW.CA": { url:"https://upload.wikimedia.org/wikipedia/en/4/49/ATTIJARIWAFA_BANK_LOGO.png", fallback:"https://wsrv.nl/?url=attijariwafabank.com/favicon.ico&w=128&h=128&fit=contain&output=png", label:"AWB",  bg:"#E8740C" },
+      "IAM.CA": { url:"https://upload.wikimedia.org/wikipedia/commons/1/18/Maroc_telecom_new_logo.jpg", fallback:"https://wsrv.nl/?url=iam.ma/favicon.ico&w=128&h=128&fit=contain&output=png",                label:"IAM",  bg:"#E4002B" },
+      "MNG.CA": { url:"https://images.seeklogo.com/logo-png/31/1/groupe-managem-logo-png_seeklogo-318160.png", fallback:"https://wsrv.nl/?url=managemgroup.com/favicon.ico&w=128&h=128&fit=contain&output=png",      label:"MNG",  bg:"#F4B400" },
+      "BCP.CA": { url:"https://upload.wikimedia.org/wikipedia/commons/b/b8/Logo_BCP.svg", fallback:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjggMTI4Ij48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImJjcEciIHgxPSIwIiB5MT0iMCIgeDI9IjAiIHkyPSIxIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNGMDhEMkMiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNDODVBMDAiLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cmVjdCB3aWR0aD0iMTI4IiBoZWlnaHQ9IjEyOCIgcng9IjE2IiBmaWxsPSJ1cmwoI2JjcEcpIi8+PHBhdGggZD0iTTY0IDIwIEw5MiAzMCBMOTIgNjYgUTkyIDkyIDY0IDEwOCBRMzYgOTIgMzYgNjYgTDM2IDMwIFoiIGZpbGw9IiNmZmYiIG9wYWNpdHk9IjAuMTIiLz48dGV4dCB4PSI2NCIgeT0iNTgiIGZvbnQtZmFtaWx5PSJBcmlhbCBCbGFjaywgSGVsdmV0aWNhLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjMwIiBmb250LXdlaWdodD0iOTAwIiBmaWxsPSIjZmZmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBsZXR0ZXItc3BhY2luZz0iLTEiPkJDUDwvdGV4dD48dGV4dCB4PSI2NCIgeT0iODIiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iI0ZGRTNDNCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgbGV0dGVyLXNwYWNpbmc9IjAuNSI+QkFOUVVFIFBPUFVMQUlSRTwvdGV4dD48cmVjdCB4PSIzMiIgeT0iOTIiIHdpZHRoPSI2NCIgaGVpZ2h0PSIzIiByeD0iMS41IiBmaWxsPSIjZmZmIi8+PHRleHQgeD0iNjQiIHk9IjExMCIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjgiIGZpbGw9IiNmZmYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGxldHRlci1zcGFjaW5nPSIyIj5NQVJPQzwvdGV4dD48L3N2Zz4=", label:"BCP",  bg:"#E8740C" },
+      "MDP.CA": { url:"https://images.seeklogo.com/logo-png/24/1/marsa-maroc-logo-png_seeklogo-242441.png", fallback:"https://wsrv.nl/?url=marsamaroc.co.ma/favicon.ico&w=128&h=128&fit=contain&output=png", label:"MDP",  bg:"#0B3D91" },
+      "BOA.CA": { url:"https://upload.wikimedia.org/wikipedia/commons/6/67/Bank_of_Africa_Logo.png", fallback:"https://wsrv.nl/?url=bankofafrica.ma/favicon.ico&w=128&h=128&fit=contain&output=png",       label:"BOA",  bg:"#1B3A5C" },
+      "GTM.CA": { url:"https://upload.wikimedia.org/wikipedia/commons/9/96/SGTM-logo.png", fallback:"https://wsrv.nl/?url=sgtm.ma/favicon.ico&w=128&h=128&fit=contain&output=png",               label:"SGTM", bg:"#2E7D32" },
+      "LHM.CA": { url:"https://upload.wikimedia.org/wikipedia/commons/7/7c/LafargeHolcim_logo.svg", fallback:"https://wsrv.nl/?url=lafargeholcim.ma/favicon.ico&w=128&h=128&fit=contain&output=png",      label:"LH",   bg:"#6B5F50" },
+      "TQM.CA": { url:"https://cdn.brandfetch.io/id2AIN060a/theme/light/logo.svg?c=1bxid64Mup7aczewSAYMX&t=1767868116867", fallback:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjggMTI4Ij48cmVjdCB3aWR0aD0iMTI4IiBoZWlnaHQ9IjEyOCIgcng9IjE2IiBmaWxsPSIjRkZGRkZGIi8+PHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjEyOCIgaGVpZ2h0PSIxMjgiIHJ4PSIxNiIgZmlsbD0iIzAwQTVDOCIgb3BhY2l0eT0iMC4wOCIvPjxjaXJjbGUgY3g9IjIyIiBjeT0iNDAiIHI9IjgiIGZpbGw9IiNFNjAwN0UiLz48dGV4dCB4PSI2NCIgeT0iNTgiIGZvbnQtZmFtaWx5PSInU2Vnb2UgVUknLCBBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIzNCIgZm9udC13ZWlnaHQ9IjMwMCIgZmlsbD0iIzAwQTVDOCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgbGV0dGVyLXNwYWNpbmc9Ii0xIj50YXFhPC90ZXh0Pjx0ZXh0IHg9IjY0IiB5PSI4MiIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmb250LXdlaWdodD0iNzAwIiBmaWxsPSIjNEE0QTRBIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBsZXR0ZXItc3BhY2luZz0iMyI+TU9ST0NDTzwvdGV4dD48cGF0aCBkPSJNMjggOTQgTDEwMCA5NCIgc3Ryb2tlPSIjMDBBNUM4IiBzdHJva2Utd2lkdGg9IjIiLz48dGV4dCB4PSI2NCIgeT0iMTEyIiBmb250LWZhbWlseT0iQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iOCIgZmlsbD0iIzY2NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgbGV0dGVyLXNwYWNpbmc9IjEiPlBPV0VSICZhbXA7IFdBVEVSPC90ZXh0Pjwvc3ZnPg==", label:"TAQA", bg:"#00A5C8" },
+      "CMA.CA": { url:"https://upload.wikimedia.org/wikipedia/fr/8/80/Ciments_du_Maroc_(logo).svg", fallback:"https://wsrv.nl/?url=cimentsdumaroc.com/favicon.ico&w=128&h=128&fit=contain&output=png",    label:"CdM",  bg:"#1565C0" },
+      "CSR.CA": { url:"https://upload.wikimedia.org/wikipedia/commons/5/5c/Logo_nouveau_cosumar.png", fallback:"https://wsrv.nl/?url=cosumar.co.ma/favicon.ico&w=128&h=128&fit=contain&output=png",         label:"CSR",  bg:"#7B1FA2" },
+      "LBV.CA": { url:"https://upload.wikimedia.org/wikipedia/commons/e/e7/Iabel%27vie.png", fallback:"https://wsrv.nl/?url=labelvie.ma/favicon.ico&w=128&h=128&fit=contain&output=png",           label:"LV",   bg:"#D32F2F" },
+      "TGC.CA": { url:"https://logo.clearbit.com/tgcc.ma?size=128",               fallback:"https://wsrv.nl/?url=tgcc.ma/favicon.ico&w=128&h=128&fit=contain&output=png",               label:"TGCC", bg:"#00838F" },
+      "WAA.CA": { url:"https://www.wafaassurance.ma/sites/default/files/2024-01/logo-wafaassurance.png", fallback:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjggMTI4Ij48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9IndhRyIgeDE9IjAiIHkxPSIwIiB4Mj0iMCIgeTI9IjEiPjxzdG9wIG9mZnNldD0iMCIgc3RvcC1jb2xvcj0iIzJCQTg0QSIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzAwNjgzNyIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMjgiIGhlaWdodD0iMTI4IiByeD0iMTYiIGZpbGw9InVybCgjd2FHKSIvPjxwYXRoIGQ9Ik0zMCA0NCBRNDAgODQgNTIgNjIgUTY0IDg0IDc2IDYyIFE4OCA4NCA5OCA0NCIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjQiIGZpbGw9Im5vbmUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIgb3BhY2l0eT0iMC4yNSIvPjx0ZXh0IHg9IjY0IiB5PSI2MCIgZm9udC1mYW1pbHk9Ikdlb3JnaWEsIHNlcmlmIiBmb250LXNpemU9IjI2IiBmb250LXdlaWdodD0iNzAwIiBmb250LXN0eWxlPSJpdGFsaWMiIGZpbGw9IiNmZmYiIHRleHQtYW5jaG9yPSJtaWRkbGUiPndhZmE8L3RleHQ+PHJlY3QgeD0iMzAiIHk9IjcwIiB3aWR0aD0iNjgiIGhlaWdodD0iMiIgZmlsbD0iI2ZmZiIgb3BhY2l0eT0iMC43Ii8+PHRleHQgeD0iNjQiIHk9IjkyIiBmb250LWZhbWlseT0iQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTEiIGZvbnQtd2VpZ2h0PSI2MDAiIGZpbGw9IiNmZmYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGxldHRlci1zcGFjaW5nPSIyIj5BU1NVUkFOQ0U8L3RleHQ+PHRleHQgeD0iNjQiIHk9IjExMCIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjciIGZpbGw9IiNDOEU2QzkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGxldHRlci1zcGFjaW5nPSIxIj5TRUNVUklORyBZT1VSIEZVVFVSRTwvdGV4dD48L3N2Zz4=", label:"WA",   bg:"#388E3C" },
+      "CIH.CA": { url:"https://upload.wikimedia.org/wikipedia/fr/b/b2/Logo_CIH.png", fallback:"https://wsrv.nl/?url=cihbank.ma/favicon.ico&w=128&h=128&fit=contain&output=png",            label:"CIH",  bg:"#AD1457" },
+      "AKT.CA": { url:"https://logo.clearbit.com/akdital.ma?size=128",            fallback:"https://wsrv.nl/?url=akdital.ma/favicon.ico&w=128&h=128&fit=contain&output=png",            label:"AKT",  bg:"#0097A7" },
+      "ADH.CA": { url:"https://upload.wikimedia.org/wikipedia/commons/1/1d/Addoha.png", fallback:"https://wsrv.nl/?url=groupeaddoha.com/favicon.ico&w=128&h=128&fit=contain&output=png",      label:"ADH",  bg:"#F57F17" },
+      "ALI.CA": { url:"https://www.alliances.co.ma/src/images/logo.svg",       fallback:"https://wsrv.nl/?url=alliances.co.ma/src/images/logo.svg&w=128&h=128&fit=contain&output=png",       label:"ALL",  bg:"#5D4037" },
+      "GAZ.CA": { url:"https://upload.wikimedia.org/wikipedia/commons/c/c8/Afriquia-smdc-175639.png", fallback:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjggMTI4Ij48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImFmcUciIHgxPSIwIiB5MT0iMCIgeDI9IjAiIHkyPSIxIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNGRjhBMUUiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNDNzNFMDAiLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cmVjdCB3aWR0aD0iMTI4IiBoZWlnaHQ9IjEyOCIgcng9IjE2IiBmaWxsPSJ1cmwoI2FmcUcpIi8+PHBhdGggZD0iTTY0IDIyIFE1MiA0MCA1NCA1NCBRNDggNTAgNDggNjAgUTQ4IDc4IDY0IDgyIFE4MCA3OCA4MCA2MCBRODAgNTAgNzQgNTQgUTc2IDQwIDY0IDIyIFoiIGZpbGw9IiNGRkQ1NEYiIG9wYWNpdHk9IjAuODUiLz48cGF0aCBkPSJNNjQgMzggUTU4IDQ4IDU5IDU2IFE1NiA1NCA1NiA2MCBRNTYgNzIgNjQgNzQgUTcyIDcyIDcyIDYwIFE3MiA1NCA2OSA1NiBRNzAgNDggNjQgMzggWiIgZmlsbD0iI0ZGNkYwMCIvPjx0ZXh0IHg9IjY0IiB5PSIxMDAiIGZvbnQtZmFtaWx5PSJHZW9yZ2lhLCBzZXJpZiIgZm9udC1zaXplPSIxOCIgZm9udC13ZWlnaHQ9IjcwMCIgZm9udC1zdHlsZT0iaXRhbGljIiBmaWxsPSIjZmZmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5BZnJpcXVpYTwvdGV4dD48dGV4dCB4PSI2NCIgeT0iMTE2IiBmb250LWZhbWlseT0iQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiNGRkUwQjIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGxldHRlci1zcGFjaW5nPSI0Ij5HQVo8L3RleHQ+PC9zdmc+", label:"AFQ",  bg:"#E65100" },
+      "HPS.CA": { url:"https://upload.wikimedia.org/wikipedia/fr/6/6d/Logo_hps_0.png", fallback:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjggMTI4Ij48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9Imhwc0ciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiMxRDNGN0EiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMwQTFFM0QiLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cmVjdCB3aWR0aD0iMTI4IiBoZWlnaHQ9IjEyOCIgcng9IjE2IiBmaWxsPSJ1cmwoI2hwc0cpIi8+PHJlY3QgeD0iMjIiIHk9IjMyIiB3aWR0aD0iMzAiIGhlaWdodD0iMjIiIHJ4PSIzIiBmaWxsPSIjRjlBODI1IiBvcGFjaXR5PSIwLjg1Ii8+PGxpbmUgeDE9IjI4IiB5MT0iNDAiIHgyPSI0NiIgeTI9IjQwIiBzdHJva2U9IiMwQTFFM0QiIHN0cm9rZS13aWR0aD0iMSIvPjxsaW5lIHgxPSIyOCIgeTE9IjQ2IiB4Mj0iNDYiIHkyPSI0NiIgc3Ryb2tlPSIjMEExRTNEIiBzdHJva2Utd2lkdGg9IjEiLz48dGV4dCB4PSI3OCIgeT0iNTQiIGZvbnQtZmFtaWx5PSJBcmlhbCBCbGFjaywgSGVsdmV0aWNhLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjI4IiBmb250LXdlaWdodD0iOTAwIiBmaWxsPSIjZmZmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBsZXR0ZXItc3BhY2luZz0iLTEiPkhQUzwvdGV4dD48cmVjdCB4PSIyMiIgeT0iNzIiIHdpZHRoPSI4NCIgaGVpZ2h0PSIzIiByeD0iMS41IiBmaWxsPSIjRjlBODI1Ii8+PHRleHQgeD0iNjQiIHk9Ijk0IiBmb250LWZhbWlseT0iQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iOSIgZm9udC13ZWlnaHQ9IjYwMCIgZmlsbD0iI2ZmZiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgbGV0dGVyLXNwYWNpbmc9IjEuNSI+UEFZTUVOVCBTWVNURU1TPC90ZXh0Pjx0ZXh0IHg9IjY0IiB5PSIxMTAiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSI3IiBmaWxsPSIjQTBCNEQwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBsZXR0ZXItc3BhY2luZz0iMiI+UE9XRVJJTkcgVFJBTlNBQ1RJT05TPC90ZXh0Pjwvc3ZnPg==", label:"HPS",  bg:"#283593" },
+    };
+
+    // ── Commodity icons — embedded SVG (gold bar, oil barrel, silver bar, wheat) ──
+    const COMMODITY_ICON = {
+      "GC=F": { url:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCIgdmlld0JveD0iMCAwIDY0IDY0Ij4KICA8Y2lyY2xlIGN4PSIzMiIgY3k9IjMyIiByPSIzMSIgZmlsbD0iIzFhMWEyZSIvPgogIDxwb2x5Z29uIHBvaW50cz0iMTUsNDIgMjIsMjQgNDIsMjQgNDksNDIiIGZpbGw9IiNGRkQ3MDAiIHN0cm9rZT0iI0RBQTUyMCIgc3Ryb2tlLXdpZHRoPSIwLjUiLz4KICA8cG9seWdvbiBwb2ludHM9IjIyLDI0IDI3LDE2IDQ3LDE2IDQyLDI0IiBmaWxsPSIjRkZGMTc2IiBzdHJva2U9IiNEQUE1MjAiIHN0cm9rZS13aWR0aD0iMC41Ii8+CiAgPHBvbHlnb24gcG9pbnRzPSI0MiwyNCA0NywxNiA1NCwzNCA0OSw0MiIgZmlsbD0iI0Y5QTgyNSIgc3Ryb2tlPSIjREFBNTIwIiBzdHJva2Utd2lkdGg9IjAuNSIvPgo8L3N2Zz4=" },  // Gold
+      "BZ=F": { url:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCIgdmlld0JveD0iMCAwIDY0IDY0Ij4KICA8Y2lyY2xlIGN4PSIzMiIgY3k9IjMyIiByPSIzMSIgZmlsbD0iIzFhMWEyZSIvPgogIDxyZWN0IHg9IjE4IiB5PSIxNCIgd2lkdGg9IjI4IiBoZWlnaHQ9IjM2IiByeD0iMyIgZmlsbD0iIzMzMyIgc3Ryb2tlPSIjNTU1IiBzdHJva2Utd2lkdGg9IjEiLz4KICA8ZWxsaXBzZSBjeD0iMzIiIGN5PSIxNCIgcng9IjE0IiByeT0iNSIgZmlsbD0iIzQ0NCIgc3Ryb2tlPSIjNTU1IiBzdHJva2Utd2lkdGg9IjAuNSIvPgogIDxlbGxpcHNlIGN4PSIzMiIgY3k9IjUwIiByeD0iMTQiIHJ5PSI1IiBmaWxsPSIjMmEyYTJhIiBzdHJva2U9IiM1NTUiIHN0cm9rZS13aWR0aD0iMC41Ii8+CiAgPGxpbmUgeDE9IjE4IiB5MT0iMjYiIHgyPSI0NiIgeTI9IjI2IiBzdHJva2U9IiM1NTUiIHN0cm9rZS13aWR0aD0iMC44Ii8+CiAgPGxpbmUgeDE9IjE4IiB5MT0iMzgiIHgyPSI0NiIgeTI9IjM4IiBzdHJva2U9IiM1NTUiIHN0cm9rZS13aWR0aD0iMC44Ii8+CiAgPGNpcmNsZSBjeD0iMzIiIGN5PSIzMiIgcj0iNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjNzc3IiBzdHJva2Utd2lkdGg9IjEiLz4KPC9zdmc+" },  // Brent
+      "SI=F": { url:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCIgdmlld0JveD0iMCAwIDY0IDY0Ij4KICA8Y2lyY2xlIGN4PSIzMiIgY3k9IjMyIiByPSIzMSIgZmlsbD0iIzFhMWEyZSIvPgogIDxwb2x5Z29uIHBvaW50cz0iMTUsNDIgMjIsMjQgNDIsMjQgNDksNDIiIGZpbGw9IiNDMEMwQzAiIHN0cm9rZT0iIzkwOTA5MCIgc3Ryb2tlLXdpZHRoPSIwLjUiLz4KICA8cG9seWdvbiBwb2ludHM9IjIyLDI0IDI3LDE2IDQ3LDE2IDQyLDI0IiBmaWxsPSIjRThFOEU4IiBzdHJva2U9IiM5MDkwOTAiIHN0cm9rZS13aWR0aD0iMC41Ii8+CiAgPHBvbHlnb24gcG9pbnRzPSI0MiwyNCA0NywxNiA1NCwzNCA0OSw0MiIgZmlsbD0iI0E4QThBOCIgc3Ryb2tlPSIjOTA5MDkwIiBzdHJva2Utd2lkdGg9IjAuNSIvPgo8L3N2Zz4=" },  // Silver
+      "ZW=F": { url:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCIgdmlld0JveD0iMCAwIDY0IDY0Ij4KICA8Y2lyY2xlIGN4PSIzMiIgY3k9IjMyIiByPSIzMSIgZmlsbD0iIzJkNGExZSIvPgogIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDMyLDM0KSI+CiAgICA8bGluZSB4MT0iMCIgeTE9IjE4IiB4Mj0iMCIgeTI9Ii0xMCIgc3Ryb2tlPSIjQzhBOTUxIiBzdHJva2Utd2lkdGg9IjIiLz4KICAgIDxlbGxpcHNlIGN4PSItNSIgY3k9IjAiIHJ4PSI0IiByeT0iOCIgZmlsbD0iI0RBQTUyMCIgdHJhbnNmb3JtPSJyb3RhdGUoMjApIi8+CiAgICA8ZWxsaXBzZSBjeD0iNSIgY3k9IjAiIHJ4PSI0IiByeT0iOCIgZmlsbD0iI0RBQTUyMCIgdHJhbnNmb3JtPSJyb3RhdGUoLTIwKSIvPgogICAgPGVsbGlwc2UgY3g9Ii01IiBjeT0iLTEwIiByeD0iMy41IiByeT0iNyIgZmlsbD0iI0U2QjQyMiIgdHJhbnNmb3JtPSJyb3RhdGUoMTUpIi8+CiAgICA8ZWxsaXBzZSBjeD0iNSIgY3k9Ii0xMCIgcng9IjMuNSIgcnk9IjciIGZpbGw9IiNFNkI0MjIiIHRyYW5zZm9ybT0icm90YXRlKC0xNSkiLz4KICAgIDxlbGxpcHNlIGN4PSIwIiBjeT0iLTE4IiByeD0iMyIgcnk9IjYiIGZpbGw9IiNGMEM4NTAiLz4KICA8L2c+Cjwvc3ZnPg==" },  // Wheat
+    };
+
+    // ── Forex icons (currency symbols in colored circles) ───────────────────
+    const FOREX_ICON = {
+      "EURMAD=X": { symbol:"€",  bg:"#003399", fg:"#FFD700" },  // EU blue + gold
+      "MAD=X":    { symbol:"$",  bg:"#2E7D32", fg:"#fff" },     // USD green
+      "GBPMAD=X": { symbol:"£",  bg:"#4A0072", fg:"#fff" },     // GBP purple
+      "CHFMAD=X": { symbol:"₣", bg:"#D32F2F", fg:"#fff" },     // CHF Swiss Franc
+      "CADMAD=X": { symbol:"C$", bg:"#D32F2F", fg:"#fff" },     // CAD red
+    };
+
+    // ── Casablanca Stock Exchange live data ─────────────────────────────────
+    // Maps our internal symbol → Casablanca Stock Exchange ticker code
+    const CSE_TICKERS = {
+      "ATW.CA":"ATW","IAM.CA":"IAM","MNG.CA":"MNG","BCP.CA":"BCP",
+      "MDP.CA":"MDP","BOA.CA":"BOA","LHM.CA":"LHM","TQM.CA":"TQM",
+      "CMA.CA":"CMA","CSR.CA":"CSR","LBV.CA":"LBV","TGC.CA":"TGC",
+      "WAA.CA":"WAA","CIH.CA":"CIH","AKT.CA":"AKT","ADH.CA":"ADH",
+      "ALI.CA":"ADI","GAZ.CA":"GAZ","GTM.CA":"GTM","HPS.CA":"HPS",
+    };
+
+    // Investing.com instrument IDs for Moroccan stocks (for price data fallback)
+    const INVESTING_IDS = {
+      "ATW.CA":953580,  "IAM.CA":953581,  "BCP.CA":953579,  "BOA.CA":953584,
+      "LHM.CA":1019053, "CMA.CA":1019054, "TQM.CA":1019055, "LBV.CA":1019056,
+      "CSR.CA":953582,
+    };
+
+    // ── null = "loading" state. No fake hardcoded values ever shown. ──
+    const DEMO = {
+      indices: [
+        { sym:"^MASI",  name:"MASI",    flag:"MA", last:null, chg:null, chg1w:null, chgY:null },
+        { sym:"^FCHI",  name:"CAC 40",  flag:"FR", last:null, chg:null, chg1w:null, chgY:null },
+        { sym:"^GSPC",  name:"S&P 500", flag:"US", last:null, chg:null, chg1w:null, chgY:null },
+      ],
+      forex: [
+        { sym:"EURMAD=X", name:"EUR/MAD", last:null, chg:null, chg1w:null, chg1m:null, chg3m:null },
+        { sym:"MAD=X",    name:"USD/MAD", last:null, chg:null, chg1w:null, chg1m:null, chg3m:null },
+        { sym:"GBPMAD=X", name:"GBP/MAD", last:null, chg:null, chg1w:null, chg1m:null, chg3m:null },
+        { sym:"CHFMAD=X", name:"CHF/MAD", last:null, chg:null, chg1w:null, chg1m:null, chg3m:null },
+        { sym:"CADMAD=X", name:"CAD/MAD", last:null, chg:null, chg1w:null, chg1m:null, chg3m:null },
+      ],
+      // ── Top 20 Pondération MASI — Plus grands poids par capitalisation flottante ──────────
+      // Classement basé sur le poids dans l'indice MASI (cap. flottante).
+      // Mis à jour : avril 2026. Sources : Bourse de Casablanca, BourseNews, Medias24.
+      // NOTE IT : cette liste est statique. Pour modifier l'ordre ou les valeurs,
+      //           mettre à jour cette liste + les mappings TV_MAP, YAHOO_HIST_MAP, CSE_TICKERS.
+      stocks: [
+        { sym:"ATW.CA", name:"Attijariwafa Bank",     last:null, chg:null, chgY:null },
+        { sym:"IAM.CA", name:"Itissalat Al-Maghrib",  last:null, chg:null, chgY:null },
+        { sym:"MNG.CA", name:"Managem",               last:null, chg:null, chgY:null },
+        { sym:"BCP.CA", name:"BCP",                   last:null, chg:null, chgY:null },
+        { sym:"MDP.CA", name:"SODEP-Marsa Maroc",     last:null, chg:null, chgY:null },
+        { sym:"BOA.CA", name:"Bank of Africa",        last:null, chg:null, chgY:null },
+        { sym:"GTM.CA", name:"SGTM",                  last:null, chg:null, chgY:null },
+        { sym:"LHM.CA", name:"LafargeHolcim Maroc",   last:null, chg:null, chgY:null },
+        { sym:"TQM.CA", name:"Taqa Morocco",          last:null, chg:null, chgY:null },
+        { sym:"CMA.CA", name:"Ciments du Maroc",      last:null, chg:null, chgY:null },
+        { sym:"CSR.CA", name:"Cosumar",               last:null, chg:null, chgY:null },
+        { sym:"LBV.CA", name:"Label Vie",             last:null, chg:null, chgY:null },
+        { sym:"TGC.CA", name:"TGCC",                  last:null, chg:null, chgY:null },
+        { sym:"WAA.CA", name:"Wafa Assurance",         last:null, chg:null, chgY:null },
+        { sym:"CIH.CA", name:"CIH Bank",              last:null, chg:null, chgY:null },
+        { sym:"AKT.CA", name:"Akdital",               last:null, chg:null, chgY:null },
+        { sym:"ADH.CA", name:"Douja Prom Addoha",     last:null, chg:null, chgY:null },
+        { sym:"ALI.CA", name:"Alliances",              last:null, chg:null, chgY:null },
+        { sym:"GAZ.CA", name:"Afriquia Gaz",           last:null, chg:null, chgY:null },
+        { sym:"HPS.CA", name:"HPS",                    last:null, chg:null, chgY:null },
+      ],
+      commodities: [
+        { sym:"GC=F", name:"Or (XAU/USD)",  last:null, chg:null, chg1w:null, chg1m:null, unit:"$/oz" },
+        { sym:"BZ=F", name:"Pétrole Brent", last:null, chg:null, chg1w:null, chg1m:null, unit:"$/bbl" },
+        { sym:"SI=F", name:"Argent (XAG)",  last:null, chg:null, chg1w:null, chg1m:null, unit:"$/oz" },
+        { sym:"ZW=F", name:"Blé",           last:null, chg:null, chg1w:null, chg1m:null, unit:"¢/bu" },
+      ],
+    };
+
+    // ════════════════════════════════════════════════════════════════
+    // BONDS — Bons du Trésor Marocains (BDT)
+    // ────────────────────────────────────────────────────────────────
+    // ref    = taux de référence marché secondaire BAM — 06/04/2026
+    //          Sources : investing.com marché secondaire + Express TV (mars 2026)
+    //          Confirmé : 13W=2.30%/1A=2.48%/10A=3.31% (fin mars) → hausse légère à ce jour
+    //
+    // ref3m  = taux marché secondaire BAM — 06/01/2026 (il y a 3 mois)
+    //          Sources : LesEco.ma "début d'année sous signe de détente contrôlée"
+    //                    medias24 adjudication 06/01/2026 : 2A=2.569% limite
+    //                    TMP interbancaire BAM : 2.25% stable
+    //                    Remontée : 15A +12.86 pbs, 52W +10.72 pbs, 2A +8.75 pbs (sem. du 31/12)
+    //
+    // rate   = taux live fetchés depuis bkam.ma (via fetchBourseMABonds, auto toutes les 10 min)
+    //          → écrase ref quand disponible
+    //          → auto-màj à 15h00 chaque jour (BAM publie la courbe au plus tard à 15h)
+    // ════════════════════════════════════════════════════════════════
+    // ── TAUX D'ÉMISSION (marché primaire / adjudications) ──────────
+    // emission     = dernier TMP adjudication connu (avril 2026)
+    //               Sources: BAM résultats adjudications, BourseNews, FNH, EcoActu, Medias24
+    //               Séances fév-mars 2026 : 52W=2.40%, 5A=2.901% (10/02), 52W=2.393%, 5A=2.848% (10/03)
+    //               Séance mars 2026 : 13W=2.30%, 52W=2.40%, 2A=2.50%
+    // emission3m   = TMP adjudication il y a ~3 mois (jan 2026)
+    //
+    // Spread interpretation :
+    //   emission > ref (secondaire) → PRESSION : le Trésor paie plus cher → taux montent
+    //   emission ≤ ref (secondaire) → DÉTENTE : le Trésor ne surenchérit pas → taux stables/baissent
+    // ════════════════════════════════════════════════════════════════
+    const BONDS = [
+      //                                               ← SECONDAIRE →       ← IL Y A 3 MOIS →    ← ÉMISSION (primaire) →   ← ÉMISSION 3M →
+      //                                               ref (06/04/2026)     ref3m (06/01/2026)    emission (mar-avr 2026)   emission3m (jan 2026)
+      { name:"BDT 13 semaines", label:"3M",  ref:2.378, ref3m:2.300, rate:null, chg:null, mat:"3 mois",  key:"13W", emission:2.300, emission3m:2.250, emissionLive:null },
+      { name:"BDT 26 semaines", label:"6M",  ref:2.449, ref3m:2.335, rate:null, chg:null, mat:"6 mois",  key:"26W", emission:null,  emission3m:null,  emissionLive:null },
+      { name:"BDT 52 semaines", label:"1A",  ref:2.490, ref3m:2.450, rate:null, chg:null, mat:"1 an",    key:"52W", emission:2.393, emission3m:2.350, emissionLive:null },
+      { name:"BDT 2 ans",       label:"2A",  ref:2.856, ref3m:2.569, rate:null, chg:null, mat:"2 ans",   key:"2Y",  emission:2.500, emission3m:2.450, emissionLive:null },
+      { name:"BDT 5 ans",       label:"5A",  ref:3.140, ref3m:2.880, rate:null, chg:null, mat:"5 ans",   key:"5Y",  emission:2.848, emission3m:2.750, emissionLive:null },
+      { name:"BDT 10 ans",      label:"10A", ref:3.423, ref3m:3.350, rate:null, chg:null, mat:"10 ans",  key:"10Y", emission:3.350, emission3m:3.280, emissionLive:null },
+      { name:"BDT 15 ans",      label:"15A", ref:3.684, ref3m:3.610, rate:null, chg:null, mat:"15 ans",  key:"15Y", emission:3.600, emission3m:3.540, emissionLive:null },
+      { name:"BDT 20 ans",      label:"20A", ref:3.810, ref3m:3.720, rate:null, chg:null, mat:"20 ans",  key:"20Y", emission:3.750, emission3m:3.680, emissionLive:null },
+    ];
+
+    // (Mutual fund / OPCVM tracking removed from public version — see PUBLIC-VS-PRIVATE.md)
+    const OPCVM = [];
+
+    // PROFILES supprimé
+
+    // ════════════════════════════════════════════════════════════════
+    // STATE & HELPERS
+    // ════════════════════════════════════════════════════════════════
+    let data = JSON.parse(JSON.stringify(DEMO));
+    let currentTab = "markets";
+    let currentTvSym = null;
+
+    // (Profile state supprimé)
+
+    const fmt = (v, d = 2) => {
+      if (v == null) return "—";
+      return v.toLocaleString("fr-FR", { minimumFractionDigits: d, maximumFractionDigits: d });
+    };
+
+    const fmtMad = (v) => {
+      if (v >= 1e6) return fmt(v / 1e6) + "M";
+      if (v >= 1e3) return Math.round(v / 1e3) + "k";
+      return fmt(v, 0);
+    };
+
+    const chgColor = (v) => v > 0 ? T.green : v < 0 ? T.red : T.textSec;
+    const chgSign = (v) => v > 0 ? "+" : "";
+
+    // ════════════════════════════════════════════════════════════════
+    // CLOCK
+    // ════════════════════════════════════════════════════════════════
+    function updateClock() {
+      const now = new Date();
+      const time = now.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      document.getElementById("clock").textContent = time;
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // ════════════════════════════════════════════════════════════════
+    // DATA FETCHING
+    // Architecture: TradingView Scanner (EXACT same feed as charts)
+    //               → Yahoo Finance (15-min delayed fallback)
+    //               → Dedicated FX APIs (forex only)
+    // Refresh: every 15 seconds — values flash cyan on change
+    // ════════════════════════════════════════════════════════════════
+    let lastUpdate = null;
+    let dataSource = "none"; // "tv" | "yahoo" | "none"
+
+    const PROXIES = [
+      u => "https://corsproxy.io/?url=" + encodeURIComponent(u),
+      u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
+    ];
+
+    function setDataSource(src) {
+      // Legacy helper — kept for FX section
+      setDataSourceLabel(
+        src === "tv"    ? "● TradingView Live" :
+        src === "yahoo" ? "● Yahoo Finance ~15min" : "○ Hors ligne",
+        src
+      );
+    }
+
+    function setDataSourceLabel(label, cls) {
+      // cls: "tv" | "yhoo" | "bourse" | "none"
+      dataSource = cls;
+      const el = document.getElementById("data-source");
+      if (!el) return;
+      el.style.display = "";
+      el.className = cls === "bourse" ? "tv" : (cls || "none");
+      // Use animated dot for live sources
+      if (cls === "tv" || cls === "bourse") {
+        el.innerHTML = `<span class="live-dot"></span>${label.replace(/^[●○]\s*/,'')}`;
+      } else {
+        el.textContent = label;
+      }
+    }
+
+    function showUpdateTime() {
+      lastUpdate = new Date();
+      const el = document.getElementById("last-update");
+      if (el) el.textContent = "MAJ " + lastUpdate.toLocaleTimeString("fr-FR", { hour:"2-digit", minute:"2-digit", second:"2-digit" });
+      // (Profile yields supprimé)
+    }
+
+    // (updateProfileLiveYields supprimé)
+
+    // ── TradingView Scanner ── (direct browser request — same data as TV charts)
+    async function fetchTvScanner(market, tickers, columns) {
+      const url = "https://scanner.tradingview.com/" + market + "/scan";
+      const body = JSON.stringify({ symbols: { tickers }, columns });
+      // Try direct first (works from real browser, TradingView allows browser CORS)
+      try {
+        const r = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: AbortSignal.timeout(5000), body
+        });
+        if (r.ok) { const j = await r.json(); if (j?.data?.length > 0) return j.data; }
+      } catch {}
+      // Proxied fallback
+      for (const proxy of PROXIES) {
+        try {
+          const r = await fetch(proxy(url), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            signal: AbortSignal.timeout(6000), body
+          });
+          if (!r.ok) continue;
+          const j = await r.json();
+          if (j?.data?.length > 0) return j.data;
+        } catch {}
+      }
+      return null;
+    }
+
+    function applyTvRows(tvRows, dataset, tvMapLookup, hasYtd) {
+      let hits = 0;
+      tvRows.forEach(row => {
+        const entry = dataset.find(e => TV_MAP[e.sym] === row.s);
+        if (!entry || row.d[0] == null) return;
+        entry.last = row.d[0];
+        entry.chg  = row.d[1] != null ? +row.d[1].toFixed(2) : entry.chg;
+        if (hasYtd) entry.chgY = row.d[2] != null ? +row.d[2].toFixed(2) : entry.chgY;
+        hits++;
+      });
+      return hits;
+    }
+
+    // ── Indices: [close, change, Perf.W, Perf.YTD] ──
+    function applyIdxRows(tvRows, dataset) {
+      tvRows.forEach(row => {
+        const entry = dataset.find(e => TV_MAP[e.sym] === row.s);
+        if (!entry || row.d[0] == null) return;
+        entry.last  = row.d[0];
+        entry.chg   = row.d[1] != null ? +row.d[1].toFixed(2) : entry.chg;
+        entry.chg1w = row.d[2] != null ? +row.d[2].toFixed(2) : entry.chg1w;
+        entry.chgY  = row.d[3] != null ? +row.d[3].toFixed(2) : entry.chgY;
+      });
+    }
+
+    // ── Commodities/Futures: [close, change, Perf.W, Perf.1M] ──
+    function applyCmdRows(tvRows, dataset) {
+      tvRows.forEach(row => {
+        const entry = dataset.find(e => TV_MAP[e.sym] === row.s);
+        if (!entry || row.d[0] == null) return;
+        entry.last  = row.d[0];
+        entry.chg   = row.d[1] != null ? +row.d[1].toFixed(2) : entry.chg;
+        entry.chg1w = row.d[2] != null ? +row.d[2].toFixed(2) : entry.chg1w;
+        entry.chg1m = row.d[3] != null ? +row.d[3].toFixed(2) : entry.chg1m;
+      });
+    }
+
+    // ── Dedicated apply for forex: maps Perf.W, Perf.1M, Perf.3M ──
+    function applyFxRows(tvRows, dataset) {
+      tvRows.forEach(row => {
+        const entry = dataset.find(e => TV_MAP[e.sym] === row.s);
+        if (!entry || row.d[0] == null) return;
+        entry.last  = row.d[0];
+        entry.chg   = row.d[1] != null ? +row.d[1].toFixed(2)  : entry.chg;
+        entry.chg1w = row.d[2] != null ? +row.d[2].toFixed(2)  : entry.chg1w;
+        entry.chg1m = row.d[3] != null ? +row.d[3].toFixed(2)  : entry.chg1m;
+        entry.chg3m = row.d[4] != null ? +row.d[4].toFixed(2)  : entry.chg3m;
+      });
+    }
+
+    // ── Yahoo Finance fallback ──
+    // Returns: { price, chg (day%), chgY (YTD%), chg1w (1-week%), chg1m (1-month%) }
+    // Computes 1W and 1M from daily candle closes (range=YTD gives enough history).
+    async function fetchYahoo(sym) {
+      const url = "https://query1.finance.yahoo.com/v8/finance/chart/" + sym + "?range=YTD&interval=1d";
+      for (const proxy of PROXIES) {
+        try {
+          const r = await fetch(proxy(url), { signal: AbortSignal.timeout(7000) });
+          if (!r.ok) continue;
+          const j = await r.json();
+          const res = j?.chart?.result?.[0];
+          const meta = res?.meta;
+          if (meta?.regularMarketPrice) {
+            const prev = meta.chartPreviousClose || meta.previousClose || meta.regularMarketPrice;
+            const chgDay = ((meta.regularMarketPrice - prev) / prev * 100);
+            let chgYtd = null, chg1w = null, chg1m = null;
+            const closes = res?.indicators?.quote?.[0]?.close;
+            if (closes?.length > 1) {
+              // Filter out nulls for clean lookback
+              const validCloses = closes.filter(c => c != null);
+              const now = meta.regularMarketPrice;
+              const first = validCloses[0];
+              if (first) chgYtd = ((now - first) / first * 100);
+              // 1 week ≈ 5 trading days
+              if (validCloses.length > 5) {
+                const ref1w = validCloses[validCloses.length - 5];
+                if (ref1w) chg1w = ((now - ref1w) / ref1w * 100);
+              }
+              // 1 month ≈ 22 trading days
+              if (validCloses.length > 22) {
+                const ref1m = validCloses[validCloses.length - 22];
+                if (ref1m) chg1m = ((now - ref1m) / ref1m * 100);
+              }
+            }
+            return { price: meta.regularMarketPrice, chg: chgDay, chgY: chgYtd, chg1w, chg1m };
+          }
+        } catch {}
+      }
+      return null;
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // BOURSE.MA — Official Casablanca Bourse live data for Moroccan stocks
+    // Runs in parallel with TradingView Scanner. If bourse.ma data is fresher
+    // or TV Scanner is delayed, this wins. Source: casablanca-bourse.com
+    // ════════════════════════════════════════════════════════════════
+    async function fetchBourseMA() {
+      // Official CSE endpoint — JSON feed published during market hours
+      const urls = [
+        "https://www.casablanca-bourse.com/bourseweb/FicheValeur.aspx?Cat=2&Id=94",  // fiche-valeur HTML
+        "https://api.casablanca-bourse.com/market/securities",  // speculative JSON API
+        "https://www.leboursier.ma/api?method=getStockPrice&stock=ATW",  // leboursier
+      ];
+      // Try the HTML scraping approach via CORS proxy
+      const cseUrl = "https://www.casablanca-bourse.com/bourseweb/Seance-Cotation.aspx?IdLink=2&Cat=2";
+      for (const proxy of PROXIES) {
+        try {
+          const r = await fetch(proxy(cseUrl), { signal: AbortSignal.timeout(8000) });
+          if (!r.ok) continue;
+          const html = await r.text();
+          // Parse the HTML table for stock data
+          const rows = parseCSEHtml(html);
+          if (rows && rows.length > 0) {
+            let hits = 0;
+            rows.forEach(row => {
+              const entry = data.stocks.find(s => CSE_TICKERS[s.sym] === row.ticker);
+              if (!entry || row.price == null) return;
+              const prevPrice = entry.last;
+              entry.last = row.price;
+              if (row.chg != null) entry.chg = +row.chg.toFixed(2);
+              hits++;
+            });
+            if (hits > 0) {
+              console.log(`[WealthView] ✓ bourse.ma: ${hits} Moroccan stocks updated`);
+              return hits;
+            }
+          }
+        } catch {}
+      }
+      // Fallback: try Yahoo Finance with .CS suffix for Moroccan stocks
+      return await fetchYahooMoroccan();
+    }
+
+    function parseCSEHtml(html) {
+      // Parse the CSE HTML table — looks for rows with ticker + price
+      const rows = [];
+      try {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, "text/html");
+        // Try multiple table selectors (CSE website structure)
+        const trs = doc.querySelectorAll("table tr, .table-cotation tr, #tblSeanceCotation tr");
+        trs.forEach(tr => {
+          const tds = tr.querySelectorAll("td");
+          if (tds.length < 3) return;
+          const ticker = tds[0]?.textContent?.trim().toUpperCase();
+          const priceStr = tds[1]?.textContent?.replace(/\s/g,"").replace(",",".");
+          const chgStr = tds[2]?.textContent?.replace("%","").replace(",",".");
+          const price = parseFloat(priceStr);
+          const chg = parseFloat(chgStr);
+          if (ticker && !isNaN(price) && price > 0) {
+            rows.push({ ticker, price, chg: isNaN(chg) ? null : chg });
+          }
+        });
+      } catch {}
+      return rows;
+    }
+
+    async function fetchYahooMoroccan() {
+      // Secondary fallback: Yahoo Finance .CS symbols for Moroccan stocks
+      let hits = 0;
+      const promises = data.stocks.map(async s => {
+        const yahoSym = YAHOO_HIST_MAP[s.sym] || s.sym;
+        const result = await fetchYahoo(yahoSym);
+        if (!result) return;
+        s.last = result.price;
+        if (result.chg != null) s.chg = +result.chg.toFixed(2);
+        if (result.chgY != null) s.chgY = +result.chgY.toFixed(2);
+        hits++;
+      });
+      await Promise.allSettled(promises);
+      if (hits > 0) console.log(`[WealthView] ✓ Yahoo .CS: ${hits} Moroccan stocks`);
+      return hits;
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // LIGHTWEIGHT CHARTS — Yahoo Finance historical data for chart modal
+    // Works for ALL instruments: indices, commodities, stocks, forex.
+    // No TradingView subscription needed. Open-source library.
+    // ════════════════════════════════════════════════════════════════
+    async function fetchYahooHistorical(yahooSym) {
+      // Fetch 1 year of daily OHLCV data from Yahoo Finance
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${yahooSym}?range=1y&interval=1d`;
+      // Try direct (works in browser), then proxied
+      const tryEndpoints = [
+        url,
+        ...PROXIES.map(p => p(url)),
+      ];
+      for (const endpoint of tryEndpoints) {
+        try {
+          const r = await fetch(endpoint, { signal: AbortSignal.timeout(8000) });
+          if (!r.ok) continue;
+          const j = await r.json();
+          const res = j?.chart?.result?.[0];
+          if (!res?.timestamp?.length) continue;
+          const times  = res.timestamp;
+          const ohlc   = res.indicators?.quote?.[0];
+          if (!ohlc?.close) continue;
+          // Build candlestick array for Lightweight Charts
+          const candles = times.map((t, i) => ({
+            time:  t,
+            open:  ohlc.open?.[i]  ?? ohlc.close[i],
+            high:  ohlc.high?.[i]  ?? ohlc.close[i],
+            low:   ohlc.low?.[i]   ?? ohlc.close[i],
+            close: ohlc.close[i],
+          })).filter(c => c.close != null && c.close > 0);
+          if (candles.length > 10) return candles;
+        } catch {}
+      }
+      return null;
+    }
+
+    function renderLWChart(container, sym, candles) {
+      container.innerHTML = "";
+      if (typeof LightweightCharts === "undefined") {
+        renderTVWidget(container, sym); return;
+      }
+      // Destroy previous instance
+      if (container._lwChart) { try { container._lwChart.remove(); } catch {} container._lwChart = null; }
+      if (container._lwObs)   { container._lwObs.disconnect(); container._lwObs = null; }
+
+      const chart = LightweightCharts.createChart(container, {
+        width:  container.clientWidth  || 800,
+        height: container.clientHeight || 400,
+        layout: {
+          background: { type: "solid", color: "#060910" },
+          textColor: "#8b949e",
+          fontFamily: "Inter, sans-serif",
+          fontSize: 12,
+        },
+        grid: {
+          vertLines: { color: "rgba(0,212,255,0.06)" },
+          horzLines: { color: "rgba(0,212,255,0.06)" },
+        },
+        crosshair: { mode: 1 },
+        rightPriceScale: { borderColor: "rgba(0,212,255,0.2)" },
+        timeScale: { borderColor: "rgba(0,212,255,0.2)", timeVisible: true },
+        watermark: { visible: false },
+      });
+
+      const series = chart.addCandlestickSeries({
+        upColor:        "#00e676", downColor:        "#ff4757",
+        borderUpColor:  "#00e676", borderDownColor:  "#ff4757",
+        wickUpColor:    "#00e676", wickDownColor:    "#ff4757",
+      });
+      series.setData(candles);
+      chart.timeScale().fitContent();
+
+      // Source label
+      const label = document.createElement("div");
+      label.style.cssText = "position:absolute;bottom:8px;left:12px;font-size:10px;font-family:'JetBrains Mono',monospace;color:rgba(0,212,255,0.5);pointer-events:none;z-index:5;";
+      label.textContent = "Source: Yahoo Finance · 1 an · Quotidien";
+      container.style.position = "relative";
+      container.appendChild(label);
+
+      // Responsive resize
+      container._lwObs = new ResizeObserver(() => {
+        if (container._lwChart) {
+          container._lwChart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+        }
+      });
+      container._lwObs.observe(container);
+      container._lwChart = chart;
+    }
+
+    function renderTVWidget(container, sym) {
+      // TradingView Advanced Chart — area style ("3"), full toolbar, dark theme.
+      // tv.js is preloaded in <head> so TradingView is always available immediately.
+      // TV_CHART_MAP swaps futures/premium symbols → free OANDA/FOREXCOM/TVC equivalents.
+      const tvSym = TV_CHART_MAP[sym] || TV_MAP[sym] || sym;
+      container.innerHTML = "";
+
+      // Container div that TradingView.widget writes the iframe into
+      const uid = "tv_" + Math.random().toString(36).slice(2, 9);
+      const innerDiv = document.createElement("div");
+      innerDiv.id = uid;
+      innerDiv.style.cssText = "width:100%;height:100%;";
+      container.appendChild(innerDiv);
+
+      function createWidget() {
+        if (typeof TradingView === "undefined") {
+          // tv.js not ready yet — retry in 200ms (race on very slow connections)
+          setTimeout(createWidget, 200);
+          return;
+        }
+        new TradingView.widget({
+          container_id:        uid,
+          symbol:              tvSym,
+          width:               "100%",
+          height:              "100%",
+          interval:            "D",
+          timezone:            "Africa/Casablanca",
+          theme:               "dark",
+          style:               "3",    // Area chart (filled line) — matches screenshot
+          locale:              "fr",
+          toolbar_bg:          "#060910",
+          backgroundColor:     "rgba(6,9,16,1)",
+          gridColor:           "rgba(0,212,255,0.06)",
+          lineColor:           "#00d4ff",
+          topColor:            "rgba(0,212,255,0.28)",
+          bottomColor:         "rgba(0,212,255,0.02)",
+          allow_symbol_change: true,
+          hide_top_toolbar:    false,
+          hide_legend:         false,
+          save_image:          false,
+          calendar:            false,
+          hide_volume:         false,
+        });
+      }
+      createWidget();
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // BAM (Bank Al-Maghrib) — BDT taux de référence live fetch
+    // Source officielle : bkam.ma/Marches/Principaux-indicateurs/Marche-des-bons-de-tresor
+    //
+    // Stratégie :
+    //   Phase 1 : Tentative directe sur l'URL BAM via proxies CORS (raw text)
+    //   Phase 2 : allorigins.win/get (retourne {contents:...} en JSON)
+    //   Phase 3 : Sources de repli (casablanca-bourse, leboursier)
+    //   Phase 4 : Taux de référence statiques (ref dans BONDS)
+    //
+    // Parser BAM : chaque ligne du tableau contient une date d'échéance et un taux.
+    //   → on calcule la maturité résiduelle en jours
+    //   → on interpole linéairement vers les 8 maturités cibles du BONDS array
+    // ════════════════════════════════════════════════════════════════
+    async function fetchBourseMABonds() {
+      // ── URL BAM officielle (plusieurs variantes) ──────────────────────
+      const BAM_URLS = [
+        "https://www.bkam.ma/Marches/Principaux-indicateurs/Marche-des-bons-de-tresor",
+        "https://www.bkam.ma/Marches/Principaux-indicateurs/Marche-des-bons-du-tresor",
+        "https://www.bkam.ma/en/Markets/Key-figures/Treasury-bill-market",
+      ];
+      const FALLBACK_URLS = [
+        "https://www.casablanca-bourse.com/bourseweb/Oblig.aspx",
+        "https://www.leboursier.ma/api?method=getObligations",
+      ];
+
+      // ── Phase 1 : proxies CORS — raw text ────────────────────────────
+      for (const url of BAM_URLS) {
+        for (const proxy of PROXIES) {
+          try {
+            const r = await fetch(proxy(url), { signal: AbortSignal.timeout(10000) });
+            if (!r.ok) continue;
+            const text = await r.text();
+            if (!text || text.length < 500) continue;
+            const hits = parseBAMBDTHtml(text);
+            if (hits >= 3) { updateBondsUI("BAM (live)"); return hits; }
+          } catch {}
+        }
+      }
+
+      // ── Phase 2 : allorigins JSON wrapper {contents:"..."} ────────────
+      for (const url of BAM_URLS) {
+        try {
+          const wrapUrl = "https://api.allorigins.win/get?url=" + encodeURIComponent(url);
+          const r = await fetch(wrapUrl, { signal: AbortSignal.timeout(12000) });
+          if (!r.ok) continue;
+          const j = await r.json();
+          if (!j?.contents || j.contents.length < 500) continue;
+          const hits = parseBAMBDTHtml(j.contents);
+          if (hits >= 3) { updateBondsUI("BAM (live)"); return hits; }
+        } catch {}
+      }
+
+      // ── Phase 3 : sources de repli (casablanca-bourse, leboursier) ────
+      for (const url of FALLBACK_URLS) {
+        for (const proxy of PROXIES) {
+          try {
+            const r = await fetch(proxy(url), { signal: AbortSignal.timeout(7000) });
+            if (!r.ok) continue;
+            const text = await r.text();
+            try {
+              const j = JSON.parse(text);
+              if (j && (j.data || j.rates || Array.isArray(j))) {
+                const arr = j.data || j.rates || j;
+                let hits = 0;
+                arr.forEach(item => {
+                  const b = BONDS.find(b => b.key === item.key || b.mat === item.mat || b.name === item.name);
+                  if (!b || item.rate == null) return;
+                  const liveRate = parseFloat(item.rate);
+                  if (!isNaN(liveRate) && liveRate > 0) {
+                    b.chg = +(liveRate - b.ref).toFixed(3); b.rate = +liveRate.toFixed(3); hits++;
+                  }
+                });
+                if (hits > 0) { updateBondsUI("marché secondaire (live)"); return hits; }
+              }
+            } catch {}
+            const hits = parseBondsHtml(text);
+            if (hits > 0) { updateBondsUI("marché secondaire (live)"); return hits; }
+          } catch {}
+        }
+      }
+
+      // ── Phase 4 : taux de référence statiques (fallback) ─────────────
+      BONDS.forEach(b => { b.rate = b.ref; b.chg = 0; });
+      updateBondsUI("BAM (référence 06/04/2026)");
+      return 0;
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // parseBAMBDTHtml — parse la page HTML de bkam.ma et extrait les
+    // taux de référence par maturité résiduelle.
+    //
+    // La page BAM affiche un tableau listant toutes les lignes de BDT
+    // en circulation. Chaque ligne contient une date d'échéance et un
+    // taux de référence du marché secondaire.
+    //
+    // Algorithme :
+    //   1. Parcourir toutes les <tr> de toutes les <table>
+    //   2. Pour chaque ligne, chercher une date d'échéance future (dd/mm/yyyy)
+    //      et un taux décimal entre 0.5% et 10%
+    //   3. Calculer la maturité résiduelle en jours
+    //   4. Interpoler linéairement vers les 8 maturités cibles
+    //      (91j / 182j / 365j / 730j / 1825j / 3650j / 5475j / 7300j)
+    // ════════════════════════════════════════════════════════════════
+    function parseBAMBDTHtml(html) {
+      let hits = 0;
+      try {
+        const parser = new DOMParser();
+        const doc    = new DOMParser().parseFromString(html, "text/html");
+        const today  = new Date(); today.setHours(0,0,0,0);
+
+        // Collect all (daysToMaturity, rate) pairs from every table row
+        const bondLines = [];
+        const seenDays  = new Set();
+
+        doc.querySelectorAll("table tr").forEach(row => {
+          const cells = [...row.querySelectorAll("td, th")];
+          if (cells.length < 2) return;
+          const texts = cells.map(c => c.textContent.trim());
+
+          // ── Find a future maturity date ──
+          let matDate = null;
+          for (const txt of texts) {
+            // dd/mm/yyyy or dd-mm-yyyy
+            const m1 = txt.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+            // yyyy-mm-dd
+            const m2 = txt.match(/^(\d{4})\-(\d{2})\-(\d{2})$/);
+            if (m1) {
+              const dt = new Date(+m1[3], +m1[2]-1, +m1[1]);
+              if (dt > today) { matDate = dt; break; }
+            }
+            if (m2) {
+              const dt = new Date(+m2[1], +m2[2]-1, +m2[3]);
+              if (dt > today) { matDate = dt; break; }
+            }
+          }
+          if (!matDate) return;
+
+          // ── Find a rate: decimal between 0.5 and 10, NOT a year/percentage >10 ──
+          let rate = null;
+          for (const txt of texts) {
+            // Skip obvious ISIN / large integers / dates
+            if (/^[A-Z]{2}[A-Z0-9]{10}$/.test(txt)) continue;
+            if (/^\d{4,}$/.test(txt)) continue;
+            const clean = txt.replace(/\s/g,"").replace(",",".").replace("%","");
+            const n = parseFloat(clean);
+            if (!isNaN(n) && n >= 0.5 && n <= 10 && /^\d{1,2}\.\d{2,4}$/.test(clean)) {
+              rate = +n.toFixed(3); break;
+            }
+          }
+          if (rate === null) return;
+
+          const daysToMat = Math.round((matDate - today) / 86400000);
+          if (daysToMat < 1 || seenDays.has(daysToMat)) return;
+          seenDays.add(daysToMat);
+          bondLines.push({ days: daysToMat, rate });
+        });
+
+        if (bondLines.length === 0) return 0;
+        bondLines.sort((a, b) => a.days - b.days);
+        console.log(`[BAM BDT] ${bondLines.length} lignes extraites:`, bondLines.map(l=>`${l.days}j→${l.rate}%`).join(", "));
+
+        // ── Interpolate to standard maturities ──
+        // 3M=91j, 6M=182j, 1A=365j, 2A=730j, 5A=1825j, 10A=3650j, 15A=5475j, 20A=7300j
+        const targets = [91, 182, 365, 730, 1825, 3650, 5475, 7300];
+        BONDS.forEach((bond, i) => {
+          const r = _bamInterpolate(bondLines, targets[i]);
+          if (r !== null && r > 0.1) {
+            bond.rate = r;
+            bond.chg  = +(r - bond.ref).toFixed(3);
+            hits++;
+          }
+        });
+      } catch(e) {
+        console.warn("[BAM BDT] parseBAMBDTHtml error:", e);
+      }
+      return hits;
+    }
+
+    // ── Interpolation linéaire sur la courbe des taux ─────────────────────
+    // Trouve les deux points encadrant targetDays et interpole linéairement.
+    // Si le gap > 3 ans, utilise le point le plus proche sans interpolation.
+    function _bamInterpolate(lines, targetDays) {
+      if (!lines || lines.length === 0) return null;
+      const exact = lines.find(l => Math.abs(l.days - targetDays) <= 7);
+      if (exact) return +exact.rate.toFixed(3);
+      const below = lines.filter(l => l.days <  targetDays);
+      const above = lines.filter(l => l.days >= targetDays);
+      if (below.length === 0) return +above[0].rate.toFixed(3);
+      if (above.length === 0) return +below[below.length-1].rate.toFixed(3);
+      const lo = below[below.length-1];
+      const hi = above[0];
+      // Avoid interpolation over huge gaps (> 3 years apart)
+      if (hi.days - lo.days > 1095) {
+        return Math.abs(targetDays - lo.days) <= Math.abs(hi.days - targetDays)
+          ? +lo.rate.toFixed(3) : +hi.rate.toFixed(3);
+      }
+      const t = (targetDays - lo.days) / (hi.days - lo.days);
+      return +(lo.rate + t * (hi.rate - lo.rate)).toFixed(3);
+    }
+
+    // ── Fallback parser générique (casablanca-bourse / leboursier) ────────
+    function parseBondsHtml(html) {
+      let hits = 0;
+      try {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, "text/html");
+        const rows = doc.querySelectorAll("table tr, tr");
+        const matMap = { "13":BONDS[0],"26":BONDS[1],"52":BONDS[2],"2 an":BONDS[3],
+                         "5 an":BONDS[4],"10 an":BONDS[5],"15 an":BONDS[6],"20 an":BONDS[7] };
+        rows.forEach(row => {
+          const cells = row.querySelectorAll("td, th");
+          if (cells.length < 2) return;
+          const label   = cells[0].textContent.trim();
+          const rateStr = cells[1].textContent.replace("%","").replace(",",".").trim();
+          const rate    = parseFloat(rateStr);
+          if (isNaN(rate) || rate <= 0 || rate > 15) return;
+          for (const [key, bond] of Object.entries(matMap)) {
+            if (label.includes(key)) {
+              bond.rate = +rate.toFixed(3);
+              bond.chg  = +(rate - bond.ref).toFixed(3);
+              hits++; break;
+            }
+          }
+        });
+      } catch {}
+      return hits;
+    }
+
+    let _bdtLastSource = "BAM (référence)";  // track last source for table label
+    function updateBondsUI(sourceLabel) {
+      _bdtLastSource = sourceLabel;
+      const dot = document.getElementById("bonds-source-dot");
+      const lbl = document.getElementById("bonds-source-label");
+      const isLive = sourceLabel.toLowerCase().includes("live");
+      if (dot) dot.style.background = isLive ? "#00e676" : "#f0a500";
+      if (lbl) lbl.textContent = `Source: ${sourceLabel} · MAJ ${new Date().toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})}`;
+      renderBondsTable();
+      try { renderBondsChart(); } catch {}
+      // Also update the new Marchés-tab sections
+      saveBDTSnapshot();
+      renderBDTMarketsTable();
+      try { renderBDTCurveMarkets(); } catch(e) {
+        console.error("[BDT Chart]", e);
+        var s = document.getElementById("bdt-curve-source");
+        if (s) s.textContent = "ERR updateBondsUI: " + e.message;
+      }
+      try { renderEmissionVsSecondary(); } catch(e) {
+        console.error("[Emission Chart]", e);
+      }
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // Mutual fund (OPCVM) tracking stubs — removed in public version.
+    // See PUBLIC-VS-PRIVATE.md for the architecture of the removed module.
+    // ════════════════════════════════════════════════════════════════
+    function applyStoredDeltaJ() { /* no-op in public version */ }
+
+    async function fetchBourseMAOpcvm() { return 0; }
+    function parseOpcvmHtml() { return 0; }
+    function updateOpcvmUI() { /* no-op in public version */ }
+    function loadVlSnapshot() { return null; }
+    function saveVlSnapshot() { /* no-op */ }
+
+    // ── Main fetch cycle ──
+    async function fetchAllMarketData() {
+      // cols per market: indices [close, change, Perf.W, Perf.YTD]
+      //                  stocks  [close, change, Perf.YTD]
+      //                  futures [close, change, Perf.W, Perf.1M]
+      //                  forex   [close, change, Perf.W, Perf.1M, Perf.3M]
+      const colsIdx = ["close", "change", "Perf.W", "Perf.YTD"];
+      const colsStk = ["close", "change", "Perf.YTD"];
+      const colsCmd = ["close", "change", "Perf.W", "Perf.1M"];
+      const colsFx  = ["close", "change", "Perf.W", "Perf.1M", "Perf.3M"];
+      let anyGlobal = false;  // indices + commodities + forex via TV Scanner
+      let stkSource = "none"; // "bourse" | "tv" | "yahoo" | "none"
+
+      // ════════════════════════════════════════════════════════
+      // PRIORITY ORDER FOR MOROCCAN STOCKS:
+      //   1. bourse.ma  (official Casablanca Bourse — most real-time)
+      //   2. TradingView Scanner (CSEMA market)
+      //   3. Yahoo Finance (.CS Casablanca suffix)
+      //
+      // GLOBAL MARKETS (indices, commodities, forex):
+      //   1. TradingView Scanner
+      //   2. Yahoo Finance
+      // ════════════════════════════════════════════════════════
+
+      // ── Step 1: bourse.ma (Moroccan stocks) + TV Scanner (everything else) — parallel ──
+      // COMMODITY STRATEGY (two-pass):
+      //   Pass A — PRICE: OANDA spot CFDs via forex scanner → gives accurate spot price that
+      //            matches the chart widget (no futures basis gap). But OANDA symbols don't
+      //            return Perf.W / Perf.1M from the scanner.
+      //   Pass B — PERFORMANCE: original futures symbols (COMEX:GC1!, etc.) via futures scanner
+      //            → gives Perf.W and Perf.1M columns. We ONLY take performance data from
+      //            futures, NEVER overwrite the spot price.
+      //   Blé: CBOT:ZW1! via america scanner (Pass B écrit prix + variation + perf)
+      const cmdSymsOanda = data.commodities.filter(c => TV_MAP[c.sym]?.startsWith("OANDA:")).map(c => TV_MAP[c.sym]);
+      const globalSyms   = [...data.indices.map(i => TV_MAP[i.sym]).filter(Boolean)];
+
+      // Futures symbols for performance-only fetch (Pass B)
+      const CMD_FUTURES_MAP = { "GC=F":"COMEX:GC1!", "BZ=F":"NYMEX:BZ1!", "SI=F":"COMEX:SI1!", "ZW=F":"CBOT:ZW1!" };
+      const futuresSyms = data.commodities.map(c => CMD_FUTURES_MAP[c.sym]).filter(Boolean);
+
+      const [bourseHits, idxAndWheatRows, stkTvRows, cmdOandaRows, cmdFuturesRows, fxRows] = await Promise.all([
+        fetchBourseMA(),
+        fetchTvScanner("global",  globalSyms,                                               colsIdx),
+        fetchTvScanner("morocco", data.stocks.map(s => TV_MAP[s.sym]).filter(Boolean),      colsStk),
+        cmdSymsOanda.length ? fetchTvScanner("forex", cmdSymsOanda, colsCmd) : Promise.resolve(null),
+        // Essai "america" puis "global" pour les futures Perf.W / Perf.1M
+        futuresSyms.length ? (async () => {
+          const r = await fetchTvScanner("america", futuresSyms, colsCmd);
+          if (r && r.length > 0) return r;
+          return fetchTvScanner("global", futuresSyms, colsCmd);
+        })() : Promise.resolve(null),
+        fetchTvScanner("forex",   data.forex.map(f => TV_MAP[f.sym]).filter(Boolean),       colsFx),
+      ]);
+
+      // Apply global market data from TV Scanner (indices only — commodities via OANDA/futures)
+      if (idxAndWheatRows) {
+        if (idxAndWheatRows.length) { applyIdxRows(idxAndWheatRows, data.indices); anyGlobal = true; }
+      }
+
+      // Pass A — Apply OANDA spot PRICES (close + day change)
+      if (cmdOandaRows) { applyCmdRows(cmdOandaRows, data.commodities); anyGlobal = true; }
+
+      // Pass B — Futures scanner (COMEX:GC1!, NYMEX:BZ1!, COMEX:SI1!, CBOT:ZW1!)
+      // Pour les commodities OANDA (or, pétrole, argent) : Perf.W / Perf.1M seulement (prix spot via Pass A)
+      // Pour le Blé (CBOT:ZW1!) : prix + variation + Perf.W / Perf.1M (c'est la source principale)
+      if (cmdFuturesRows) {
+        const hasOanda = new Set(
+          data.commodities.filter(c => TV_MAP[c.sym]?.startsWith("OANDA:")).map(c => c.sym)
+        );
+        cmdFuturesRows.forEach(row => {
+          const internalSym = Object.keys(CMD_FUTURES_MAP).find(k => CMD_FUTURES_MAP[k] === row.s);
+          if (!internalSym) return;
+          const entry = data.commodities.find(e => e.sym === internalSym);
+          if (!entry) return;
+          // Blé et toute commodity sans OANDA : écrire prix + variation journalière depuis le futures
+          if (!hasOanda.has(internalSym) && row.d[0] != null) {
+            entry.last = row.d[0];
+            entry.chg  = row.d[1] != null ? +row.d[1].toFixed(2) : entry.chg;
+          }
+          // Performance 1 sem / 1 mois pour tous
+          if (row.d[2] != null) entry.chg1w = +row.d[2].toFixed(2);
+          if (row.d[3] != null) entry.chg1m = +row.d[3].toFixed(2);
+        });
+        anyGlobal = true;
+      }
+
+      if (fxRows) { applyFxRows(fxRows, data.forex); anyGlobal = true; }
+
+      // Apply Moroccan stocks — bourse.ma wins, TV Scanner only if bourse.ma empty
+      if (bourseHits > 0) {
+        // bourse.ma already wrote into data.stocks inside fetchBourseMA()
+        stkSource = "bourse";
+        console.log(`[WealthView] ✓ bourse.ma: ${bourseHits} actions CSE en direct`);
+      } else if (stkTvRows) {
+        // bourse.ma returned nothing → fallback to TradingView Scanner
+        applyTvRows(stkTvRows, data.stocks, null, true);
+        stkSource = "tv";
+        console.log("[WealthView] ✓ TV Scanner: actions CSE (bourse.ma indisponible)");
+      }
+
+      // Render immediately with whatever we have
+      if (anyGlobal || stkSource !== "none") {
+        const srcLabel = stkSource === "bourse"
+          ? "● bourse.ma + TradingView"
+          : stkSource === "tv"
+            ? "● TradingView Live"
+            : "● TradingView Live";
+        setDataSourceLabel(srcLabel, "tv");
+        ["indices","forex","stocks","commodities"].forEach(renderTable);
+        showUpdateTime();
+        // If stocks still missing, Yahoo Finance fills them silently in background
+        if (stkSource === "none") fetchYahooMoroccan().then(h => { if(h>0){ stkSource="yahoo"; renderTable("stocks"); } });
+
+        // ── Background: fill any commodity 1W/1M still null via Yahoo Finance ──
+        // Runs after initial render — non-blocking, only patches what's missing.
+        // Triggered when TradingView scanner doesn't return Perf.W/Perf.1M.
+        const fillCmdPerf = async () => {
+          const missing = data.commodities.filter(c => c.chg1w == null || c.chg1m == null);
+          if (!missing.length) return;
+          await Promise.allSettled(missing.map(async c => {
+            const sym = YAHOO_HIST_MAP[c.sym] || c.sym;
+            const y = await fetchYahoo(sym);
+            if (!y) return;
+            if (c.chg1w == null && y.chg1w != null) c.chg1w = +y.chg1w.toFixed(2);
+            if (c.chg1m == null && y.chg1m != null) c.chg1m = +y.chg1m.toFixed(2);
+          }));
+          if (data.commodities.some(c => c.chg1w != null || c.chg1m != null))
+            renderTable("commodities");
+        };
+        setTimeout(fillCmdPerf, 800);   // 1ère tentative rapide
+        setTimeout(fillCmdPerf, 8000);  // 2ème tentative si la 1ère échoue (réseau lent)
+
+        return;
+      }
+
+      // ── Step 2: Full Yahoo Finance fallback (TV Scanner completely unavailable) ──
+      console.log("[WealthView] TV Scanner indisponible — Yahoo Finance (fallback)");
+      const [yahooGlobalHits, yahooStkHits] = await Promise.all([
+        // Global: indices + commodities via Yahoo
+        (async () => {
+          const items = [...data.indices, ...data.commodities];
+          const results = await Promise.allSettled(items.map(r => fetchYahoo(YAHOO_HIST_MAP[r.sym] || r.sym)));
+          let hits = 0;
+          items.forEach((item, i) => {
+            const r = results[i];
+            if (r.status !== "fulfilled" || !r.value) return;
+            const { price, chg, chgY, chg1w, chg1m } = r.value;
+            item.last = price; item.chg = +chg.toFixed(2);
+            if (chgY  != null) item.chgY  = +chgY.toFixed(2);
+            if (chg1w != null) item.chg1w = +chg1w.toFixed(2);
+            if (chg1m != null) item.chg1m = +chg1m.toFixed(2);
+            hits++;
+          });
+          return hits;
+        })(),
+        // Moroccan stocks via Yahoo (.CS)
+        fetchYahooMoroccan(),
+      ]);
+
+      const yHits = yahooGlobalHits + yahooStkHits;
+      if (yHits > 0) {
+        setDataSourceLabel("● Yahoo Finance ~15min", "yhoo");
+        ["indices","stocks","commodities"].forEach(renderTable);
+        showUpdateTime();
+      }
+
+      // ── 3. FX dedicated APIs (always run for forex, TV/Yahoo may not cover MAD pairs) ──
+      let fxOk = false;
+      // Try open.er-api.com
+      try {
+        const r = await fetch("https://open.er-api.com/v6/latest/MAD", { signal: AbortSignal.timeout(5000) });
+        const j = await r.json();
+        if (j?.rates) {
+          const map = { "EURMAD=X":"EUR","MAD=X":"USD","GBPMAD=X":"GBP","CHFMAD=X":"CHF","CADMAD=X":"CAD" };
+          data.forex.forEach(f => { const c = map[f.sym]; if (c && j.rates[c]) { f.last = +(1/j.rates[c]).toFixed(4); f.chg = f.chg ?? 0; } });
+          fxOk = true;
+        }
+      } catch {}
+      // Fallback: frankfurter.app
+      if (!fxOk) {
+        try {
+          const r = await fetch("https://api.frankfurter.app/latest?from=EUR&to=USD,GBP,CHF,CAD,MAD", { signal: AbortSignal.timeout(5000) });
+          const j = await r.json();
+          if (j?.rates?.MAD) {
+            const b = { EUR: 1/j.rates.MAD, USD: j.rates.USD/j.rates.MAD, GBP: j.rates.GBP/j.rates.MAD, CHF: j.rates.CHF/j.rates.MAD, CAD: j.rates.CAD/j.rates.MAD };
+            const map = { "EURMAD=X":"EUR","MAD=X":"USD","GBPMAD=X":"GBP","CHFMAD=X":"CHF","CADMAD=X":"CAD" };
+            data.forex.forEach(f => { const c = map[f.sym]; if (c && b[c]) { f.last = +(b[c]).toFixed(4); f.chg = f.chg ?? 0; } });
+            fxOk = true;
+          }
+        } catch {}
+      }
+      if (fxOk) {
+        if (!anyGlobal && yHits === 0) setDataSource("yahoo");
+        renderTable("forex");
+        if (!anyGlobal && yHits === 0) showUpdateTime();
+      }
+
+      if (!anyGlobal && yHits === 0 && !fxOk) setDataSource("none");
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // TRADINGVIEW REAL-TIME WEBSOCKET
+    // ─────────────────────────────────────────────────────────────
+    // Architecture: WebSocket (same feed as chart widget) → Scanner
+    //   fallback → Yahoo Finance.
+    //
+    // The WebSocket gives INSTANT price ticks — no polling, no delay.
+    // Each price update goes straight into the specific table row via
+    // updateTableRow() + flashCell(). No full re-renders.
+    //
+    // Performance columns (1 SEM, 1 MOIS, YTD) don't change tick-by-
+    // tick — they're refreshed every 5 min via the Scanner API.
+    // ════════════════════════════════════════════════════════════════
+
+    // Unique quote session ID per page load
+    const TV_WS_QS = 'qs_' + Math.random().toString(36).slice(2, 9);
+    let tvWs        = null;
+    let tvWsAlive   = false;
+    let tvWsRetry   = 0;
+    let tvWsSymsSet = false; // true once symbols are subscribed
+
+    // All TV symbols we want to track
+    function getAllTvSyms() {
+      return [...data.indices, ...data.commodities, ...data.forex, ...data.stocks]
+        .map(x => TV_MAP[x.sym]).filter(Boolean);
+    }
+
+    // Reverse-lookup: TV symbol → { section, entry }
+    function tvSymToEntry(tvSym) {
+      for (const [section, arr] of [["indices",data.indices],["commodities",data.commodities],["forex",data.forex],["stocks",data.stocks]]) {
+        const entry = arr.find(x => TV_MAP[x.sym] === tvSym);
+        if (entry) return { section, entry };
+      }
+      return null;
+    }
+
+    // Send a TradingView protocol message over the WebSocket
+    function tvWsSend(m, p) {
+      if (!tvWs || tvWs.readyState !== 1) return;
+      const body = JSON.stringify({ m, p });
+      tvWs.send(`~m~${body.length}~m~${body}`);
+    }
+
+    // Parse TradingView's length-prefixed packet format: ~m~LEN~m~CONTENT...
+    function parseTVPacket(raw) {
+      const parts = [];
+      let i = 0;
+      while (i < raw.length) {
+        if (!raw.startsWith('~m~', i)) break;
+        i += 3;
+        const j = raw.indexOf('~m~', i);
+        if (j < 0) break;
+        const len = parseInt(raw.slice(i, j), 10);
+        i = j + 3;
+        parts.push(raw.slice(i, i + len));
+        i += len;
+      }
+      return parts;
+    }
+
+    function initTVWebSocket() {
+      if (tvWs && tvWs.readyState < 2) return; // already open / connecting
+      try {
+        tvWs = new WebSocket('wss://data.tradingview.com/socket.io/websocket?from=chart%2F&type=chart');
+
+        tvWs.onopen = () => {
+          tvWsAlive   = true;
+          tvWsRetry   = 0;
+          tvWsSymsSet = false;
+
+          // Handshake — same tokens the embedded chart widget uses
+          tvWsSend('set_auth_token', ['unauthorized_user_token']);
+          tvWsSend('quote_create_session', [TV_WS_QS]);
+          // Fields: lp=last price, chp=% change, ch=abs change, pc=prev close
+          tvWsSend('quote_set_fields', [TV_WS_QS,
+            'lp', 'chp', 'ch', 'pc',
+            'open_price', 'high_price', 'low_price',
+            'volume', 'lp_time', 'update_mode',
+          ]);
+
+          // Subscribe to every symbol on the dashboard
+          const syms = getAllTvSyms();
+          syms.forEach(sym => tvWsSend('quote_add_symbols', [TV_WS_QS, sym]));
+          tvWsSend('quote_fast_symbols', [TV_WS_QS, ...syms]);
+          tvWsSymsSet = true;
+
+          setDataSourceLabel('● TradingView Live RT', 'tv');
+          console.log(`[WealthView] ✓ WebSocket connected — ${syms.length} symboles en temps réel`);
+        };
+
+        tvWs.onmessage = (evt) => {
+          const parts = parseTVPacket(evt.data);
+          parts.forEach(content => {
+
+            // ── Heartbeat: TradingView sends ~h~N, we must echo it ──
+            if (content.startsWith('~h~')) {
+              tvWs.send(`~m~${content.length}~m~${content}`);
+              return;
+            }
+
+            // ── Parse JSON message ──
+            let msg;
+            try { msg = JSON.parse(content); } catch { return; }
+            if (msg.m !== 'qsd') return;          // only care about quote-session data
+
+            const symInfo = msg.p?.[1];
+            if (!symInfo || symInfo.s !== 'ok') return;  // skip errors / loading states
+            const v = symInfo.v;
+            const tvSym = symInfo.n;
+            if (!v?.lp) return;                          // no price in this tick
+
+            const hit = tvSymToEntry(tvSym);
+            if (!hit) return;
+
+            const { section, entry } = hit;
+            const prevLast = entry.last;
+
+            // Apply live price + day change (the WebSocket gives us these in real-time)
+            entry.last = v.lp;
+            if (v.chp != null) entry.chg = +v.chp.toFixed(2);
+
+            // ── Direct in-place row update — no full table rebuild ──
+            const tbody = document.getElementById(section + '-tbody');
+            const row   = tbody?.querySelector(`tr[data-sym="${entry.sym}"]`);
+            if (row) {
+              updateTableRow(row, entry, section);
+              // Flash price cell only when value actually changed
+              if (prevLast != null && prevLast !== entry.last) {
+                const priceCell = row.querySelectorAll('td')[1];
+                if (priceCell) flashCell(priceCell);
+              }
+            }
+            showUpdateTime();
+          });
+        };
+
+        tvWs.onerror = () => {};   // onclose handles retry
+
+        tvWs.onclose = () => {
+          tvWsAlive = false;
+          tvWsRetry++;
+          // Exponential backoff: 1s, 2s, 4s, 8s … max 30s
+          const delay = Math.min(30000, 1000 * Math.pow(2, tvWsRetry - 1));
+          if (tvWsRetry === 1) setDataSourceLabel('● Reconnexion...', 'none');
+          console.warn(`[WealthView] WebSocket fermé — reconnexion dans ${delay/1000}s`);
+          setTimeout(initTVWebSocket, delay);
+        };
+
+      } catch(e) {
+        console.warn('[WealthView] WebSocket indisponible — fallback scanner:', e);
+      }
+    }
+
+    // Pause WebSocket when tab is hidden (save resources), resume when visible
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        if (!tvWsAlive) initTVWebSocket();
+        fetchAllMarketData(); // also refresh scanner data when user comes back
+      }
+    });
+
+    // ════════════════════════════════════════════════════════════════
+    // MOROCCAN REALTIME POLLER  — runs every 30 s
+    // Priority chain (most-reliable first):
+    //   1. TradingView Scanner "morocco" + "global"  (direct HTTP, no CORS proxy)
+    //   2. bourse.ma via CORS proxy  (supplementary, extra precision)
+    //   3. Yahoo Finance .CS / ^MASI  (last resort, 15-min delay)
+    // Each successful source flashes updated cells immediately in-place.
+    // ════════════════════════════════════════════════════════════════
+    // ── helper used by Moroccan poller: write new price + flash cell in-place ──
+    function patchAndFlash(entry, newPrice, newChg, section) {
+      if (newPrice == null) return false;
+      const prev = entry.last;
+      entry.last = newPrice;
+      if (newChg != null) entry.chg = +newChg.toFixed(2);
+      const tbody = document.getElementById(section + "-tbody");
+      const row   = tbody?.querySelector(`tr[data-sym="${entry.sym}"]`);
+      if (row) {
+        updateTableRow(row, entry, section);
+        if (prev != null && prev !== newPrice) flashCell(row.querySelectorAll("td")[1]);
+      }
+      return true;
+    }
+
+    // ── Query ALL stocks in the Morocco scanner (no symbol list — catches every CSEMA ticker) ──
+    async function fetchCSEAllFilter() {
+      const url  = "https://scanner.tradingview.com/morocco/scan";
+      const body = JSON.stringify({
+        columns: ["close", "change", "Perf.YTD"],
+        range:   [0, 150],
+        sort:    { sortBy: "volume", sortOrder: "desc" },
+      });
+      const opts = { method:"POST", headers:{"Content-Type":"application/json"}, body, signal: AbortSignal.timeout(5000) };
+      // Direct first (TV allows browser CORS for scanner)
+      try { const r = await fetch(url, opts); if (r.ok) { const j = await r.json(); if (j?.data?.length) return j.data; } } catch {}
+      // Proxy fallback
+      for (const proxy of PROXIES) {
+        try {
+          const r = await fetch(proxy(url), { ...opts, signal: AbortSignal.timeout(6000) });
+          if (!r.ok) continue;
+          const j = await r.json();
+          if (j?.data?.length) return j.data;
+        } catch {}
+      }
+      return null;
+    }
+
+    async function fetchMoroccanRealtime() {
+      let masiUpdated   = false;
+      let stocksUpdated = false;
+
+      // ── 1. THREE parallel TV Scanner strategies ─────────────────────
+      // Strategy A: "global" scanner with fully-qualified CSEMA:XXX symbols → most reliable for MASI
+      // Strategy B: "morocco" scanner with explicit CSEMA:XXX symbols → works for most stocks
+      // Strategy C: "morocco" scanner WITHOUT symbols (filter=all) → catches any symbol that B misses
+      //
+      // Strategies B+C+D together guarantee all 20 MASI stocks get data.
+      // Strategy D (global) is the most reliable for all CSEMA symbols.
+
+      const masiSyms = ["CSEMA:MASI"];
+      const stkSyms  = data.stocks.map(s => TV_MAP[s.sym]).filter(Boolean);
+      const cols     = ["close", "change", "Perf.YTD"];
+
+      const [masiScan, stkScanB, stkScanC, stkScanD] = await Promise.all([
+        fetchTvScanner("global",  masiSyms, cols),   // A: MASI via global
+        fetchTvScanner("morocco", stkSyms,  cols),   // B: stocks via morocco scanner
+        fetchCSEAllFilter(),                          // C: ALL CSEMA stocks via filter
+        fetchTvScanner("global",  stkSyms,  cols),   // D: stocks via global scanner (fallback — catches what morocco misses)
+      ]);
+
+      // ── Apply MASI ──
+      if (masiScan) {
+        const row = masiScan.find(r => r.s === "CSEMA:MASI");
+        if (row?.d?.[0] != null) {
+          const e = data.indices.find(i => i.sym === "^MASI");
+          if (e) {
+            if (row.d[2] != null) e.chgY = +row.d[2].toFixed(2);
+            masiUpdated = patchAndFlash(e, row.d[0], row.d[1], "indices");
+          }
+        }
+      }
+
+      // ── Apply stocks: merge Strategy B + C, prefer whichever has a non-null price ──
+      // Build merged map: tvSym → best row data
+      const merged = new Map(); // "CSEMA:ATW" → { price, chg, chgY }
+
+      // Strategy B rows (explicit list)
+      (stkScanB || []).forEach(row => {
+        if (row.d?.[0] != null)
+          merged.set(row.s, { price: row.d[0], chg: row.d[1], chgY: row.d[2] });
+      });
+
+      // Strategy C rows (all-filter): fill gaps left by B
+      (stkScanC || []).forEach(row => {
+        if (row.d?.[0] == null) return;
+        const existing = merged.get(row.s);
+        if (!existing || (existing.chg === 0 && row.d[1] !== 0)) {
+          merged.set(row.s, { price: row.d[0], chg: row.d[1], chgY: row.d[2] });
+        }
+      });
+
+      // Strategy D rows (global scanner): fill any remaining gaps
+      (stkScanD || []).forEach(row => {
+        if (row.d?.[0] == null) return;
+        if (!merged.has(row.s)) {
+          merged.set(row.s, { price: row.d[0], chg: row.d[1], chgY: row.d[2] });
+        }
+      });
+
+      // Write merged data into data.stocks and flash
+      data.stocks.forEach(s => {
+        const tvSym = TV_MAP[s.sym];
+        if (!tvSym) return;
+        const d = merged.get(tvSym);
+        if (!d) return;
+        if (d.chgY != null) s.chgY = +d.chgY.toFixed(2);
+        if (patchAndFlash(s, d.price, d.chg, "stocks")) stocksUpdated = true;
+      });
+
+      // ── 2. bourse.ma via proxy — supplementary, run in background ───
+      ;(async () => {
+        for (const proxy of PROXIES) {
+          try {
+            const r = await fetch(proxy("https://www.casablanca-bourse.com/bourseweb/Seance-Cotation.aspx?IdLink=2&Cat=2"), { signal: AbortSignal.timeout(7000) });
+            if (!r.ok) continue;
+            const text = await r.text();
+            let anyHit = false;
+            // Try to extract MASI
+            const mm = text.match(/MASI[^<]{0,60}?(1[5-9][\d ,.']{3,8})/i);
+            if (mm) {
+              const val = parseFloat(mm[1].replace(/[\s,']/g,"").replace(",","."));
+              if (val > 10000 && val < 30000 && val !== data.indices.find(i=>i.sym==="^MASI")?.last) {
+                const e = data.indices.find(i => i.sym === "^MASI");
+                if (e && patchAndFlash(e, val, null, "indices")) { renderTable("indices"); showUpdateTime(); }
+              }
+            }
+            parseCSEHtml(text).forEach(row => {
+              const e = data.stocks.find(s => CSE_TICKERS[s.sym] === row.ticker);
+              if (!e || row.price == null) return;
+              patchAndFlash(e, row.price, row.chg, "stocks");
+              anyHit = true;
+            });
+            if (anyHit) { renderTable("stocks"); showUpdateTime(); break; }
+          } catch {}
+        }
+      })();
+
+      // ── 3. Yahoo Finance ^MASI fallback ─────────────────────────────
+      if (!masiUpdated) {
+        try {
+          const y = await fetchYahoo("^MASI");
+          if (y?.price) {
+            const e = data.indices.find(i => i.sym === "^MASI");
+            if (e) masiUpdated = patchAndFlash(e, y.price, y.chg, "indices");
+          }
+        } catch {}
+      }
+
+      // ── 4. Yahoo .CS for any stock still null ───────────────────────
+      const nullStocks = data.stocks.filter(s => s.last == null);
+      if (nullStocks.length > 0) {
+        await Promise.allSettled(nullStocks.map(async s => {
+          const y = await fetchYahoo(YAHOO_HIST_MAP[s.sym] || s.sym);
+          if (y?.price && patchAndFlash(s, y.price, y.chg, "stocks")) stocksUpdated = true;
+        }));
+      }
+
+      // ── Final render ─────────────────────────────────────────────────
+      if (masiUpdated)   { renderTable("indices"); showUpdateTime(); }
+      if (stocksUpdated) { renderTable("stocks");  showUpdateTime(); }
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // Top 20 Pondération MASI — Liste statique des 20 plus grands poids du MASI
+    // Classement par capitalisation flottante (poids dans l'indice).
+    // Cette liste est gérée manuellement — pas de scraping automatique.
+    // ════════════════════════════════════════════════════════════════
+
+    // Dictionnaire complet : nom affiché sur casablanca-bourse.com → symbole interne
+    // Utilisé par le reverse-mapping pour l'affichage
+    const CSE_NAME_TO_SYM = {
+      "AKDITAL":              "AKT.CA",
+      "ALLIANCES":            "ALI.CA",
+      "ATTIJARIWAFA BANK":    "ATW.CA",
+      "BANK OF AFRICA":       "BOA.CA",
+      "BCP":                  "BCP.CA",
+      "CDM":                  "CDM.CA",
+      "CFG BANK":             "CFG.CA",
+      "CIMENTS DU MAROC":     "CMA.CA",
+      "CMGP GROUP":           "CMG.CA",
+      "COSUMAR":              "CSR.CA",
+      "DOUJA PROM ADDOHA":    "ADH.CA",
+      "ITISSALAT AL-MAGHRIB": "IAM.CA",
+      "JET CONTRACTORS":      "JET.CA",
+      "LABEL VIE":            "LBV.CA",
+      "LAFARGEHOLCIM MAROC":  "LHM.CA",
+      "RESIDENCES DAR SAADA": "RDS.CA",
+      "SODEP-MARSA MAROC":    "MDP.CA",
+      "SONASID":              "SID.CA",
+      "TAQA MOROCCO":         "TQM.CA",
+      "TGCC S.A":             "TGC.CA",
+      "TGCC":                 "TGC.CA",
+      // Valeurs supplémentaires (Top 20 + potentiels entrants)
+      "SGTM":                 "GTM.CA",
+      "STE GENERALE DES TRAVAUX DU MAROC": "GTM.CA",
+      "MANAGEM":              "MNG.CA",
+      "MAROC TELECOM":        "IAM.CA",
+      "WAFA ASSURANCE":       "WAA.CA",
+      "HPS":                  "HPS.CA",
+      "TOTALENERGIES MARKETING MAROC": "TIM.CA",
+      "MICRODATA":            "MSA.CA",
+      "AUTO HALL":            "ATH.CA",
+      "BMCI":                 "BCI.CA",
+      "CIH BANK":             "CIH.CA",
+      "MUTANDIS":             "MUT.CA",
+      "SANLAM MAROC":         "SAH.CA",
+      "STOKVIS NORD AFRIQUE": "SNA.CA",
+      "RISMA":                "RIS.CA",
+      "S2M":                  "S2M.CA",
+      "SNEP":                 "SNP.CA",
+      "LYDEC":                "LYD.CA",
+      "DELTA HOLDING":        "DHO.CA",
+      "COLORADO":             "COL.CA",
+      "ARADEI CAPITAL":       "ARA.CA",
+      "DISWAY":               "DWY.CA",
+      "INVOLYS":              "INV.CA",
+      "AFRIQUIA GAZ":         "GAZ.CA",
+      "LESIEUR CRISTAL":      "LES.CA",
+      "MARSA MAROC":          "MDP.CA",
+      "ADDOHA":               "ADH.CA",
+      "SBM":                  "SBM.CA",
+      "SOC. DES BRASSERIES":  "SBM.CA",
+      "SOCIETE DES BRASSERIES DU MAROC": "SBM.CA",
+    };
+
+    // Reverse map for display names
+    const CSE_SYM_TO_NAME = {};
+    for (const [name, sym] of Object.entries(CSE_NAME_TO_SYM)) {
+      if (!CSE_SYM_TO_NAME[sym]) CSE_SYM_TO_NAME[sym] = name;
+    }
+
+    // ── Initial render (shows — loading state) then fetch immediately ──
+    ["indices","forex","stocks","commodities"].forEach(renderTable);
+
+    // Fetch market data immediately (no composition scraping — list is static)
+    fetchAllMarketData();       // scanner: Perf.W / Perf.1M / YTD + initial prices for all
+    fetchMoroccanRealtime();    // immediate: MASI + CSE stocks via TV Scanner
+    initTVWebSocket();          // WebSocket: real-time ticks for SP500, CAC40, forex, commodities
+
+    // ── Refresh schedule ──
+    // Moroccan market: TV Scanner every 20s (scanner rate-limit is generous)
+    setInterval(fetchMoroccanRealtime, 20 * 1000);
+    // Performance columns (Perf.W / Perf.1M / YTD) — slower, every 3 min
+    setInterval(fetchAllMarketData,    3  * 60 * 1000);
+
+    // ── BDT Bonds — fetch BAM taux de référence ──────────────────────────────
+    // BAM publie la courbe des taux quotidiennement, au plus tard à 15h00 (heure Maroc)
+    // Stratégie : fetch immédiat au chargement + toutes les 5 min + déclencheur précis à 15h01
+    fetchBourseMABonds();
+    setInterval(fetchBourseMABonds, 5 * 60 * 1000);  // refresh toutes les 5 min
+
+    // Déclencheur à 15h01 Maroc (UTC+1 ou UTC+0 selon DST) — heure exacte de publication BAM
+    (function scheduleBAMRefresh() {
+      const now   = new Date();
+      const tz    = "Africa/Casablanca";
+      try {
+        // Compute today's 15:01 in Casablanca time
+        const tgt = new Date(now.toLocaleString("en-US", { timeZone: tz }));
+        tgt.setHours(15, 1, 0, 0);
+        const nowLocal = new Date(now.toLocaleString("en-US", { timeZone: tz }));
+        let msUntil = tgt - nowLocal;
+        if (msUntil <= 0) msUntil += 24 * 60 * 60 * 1000; // déjà passé → demain
+        setTimeout(() => {
+          fetchBourseMABonds();
+          setInterval(fetchBourseMABonds, 24 * 60 * 60 * 1000); // puis chaque 24h
+        }, msUntil);
+      } catch {}
+    })();
+
+    // Mutual fund (OPCVM) scheduler removed in public version — see PUBLIC-VS-PRIVATE.md
+    function getMoroccoHHMM() {
+      const now = new Date();
+      const marocMs = now.getTime() + (now.getTimezoneOffset() * 60000) + (60 * 60000);
+      const m = new Date(marocMs);
+      return m.getHours() * 60 + m.getMinutes();
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // MODAL
+    // ════════════════════════════════════════════════════════════════
+    function openChart(sym) {
+      currentTvSym = sym;
+      // Find display name for this instrument
+      const allItems = [...data.indices, ...data.commodities, ...data.stocks, ...data.forex];
+      const item     = allItems.find(x => x.sym === sym);
+      const namePart = item?.name || sym;
+      const symPart  = TV_MAP[sym] || sym;
+
+      document.getElementById("modal-symbol").textContent = namePart + "  ·  " + symPart;
+      document.getElementById("tv-link").href = `https://www.tradingview.com/chart/?symbol=${TV_MAP[sym] || sym}`;
+
+      const container = document.getElementById("tv-container");
+      // Clean up any previous chart instance
+      if (container._lwChart)  { try { container._lwChart.remove(); } catch {} container._lwChart = null; }
+      if (container._lwObs)    { container._lwObs.disconnect(); container._lwObs = null; }
+      container.innerHTML = "";
+
+      document.getElementById("tv-modal").classList.add("active");
+
+      // ── TradingView Advanced Chart widget — primary renderer for all instruments ──
+      // TV_CHART_MAP maps commodities/indices to free-embeddable symbols (OANDA, FOREXCOM, TVC)
+      // All Moroccan stocks + forex use their native CSEMA:/FX_IDC: symbols — no subscription needed
+      renderTVWidget(container, sym);
+    }
+
+    function closeModal() {
+      document.getElementById("tv-modal").classList.remove("active");
+      const container = document.getElementById("tv-container");
+      // Clean up Lightweight Charts instance
+      if (container._lwChart)  { try { container._lwChart.remove(); } catch {} container._lwChart = null; }
+      if (container._lwObs)    { container._lwObs.disconnect(); container._lwObs = null; }
+      container.innerHTML = "";
+      currentTvSym = null;
+    }
+
+    document.getElementById("tv-modal").addEventListener("click", (e) => {
+      if (e.target.id === "tv-modal") closeModal();
+    });
+
+    // ════════════════════════════════════════════════════════════════
+    // RENDER TABLES
+    // ════════════════════════════════════════════════════════════════
+    // RENDER TABLES — smart in-place update with flash animation
+    // null values show "—" (loading), never show stale hardcoded data
+    // ════════════════════════════════════════════════════════════════
+    function L() { return `<span class="loading-val">—</span>`; }
+
+    // Fallback chain for stock logos:
+    //   1) Clearbit (data-src)  →  2) DuckDuckGo icons (data-fb)  →  3) Colored initials badge
+    // This function is called by the <img>'s onerror. On first failure it swaps to the
+    // fallback URL, on second failure it replaces the <img> with a colored <span> badge.
+    function stockLogoErr(img) {
+      const fb = img.dataset.fb;
+      if (fb) {
+        img.dataset.fb = "";   // consume — prevents infinite loop
+        img.src = fb;
+        return;
+      }
+      const sym = img.alt || "???";
+      const logo = STOCK_LOGO[Object.keys(STOCK_LOGO).find(k => STOCK_LOGO[k].label === sym)];
+      const bg = logo?.bg || "#444";
+      const span = document.createElement("span");
+      span.className = "stock-badge";
+      span.style.cssText = "background:" + bg + ";color:#fff;";
+      span.textContent = sym;
+      img.replaceWith(span);
+    }
+
+    function fmtLive(v, dec) { return v == null ? L() : fmt(v, dec); }
+    function chgLive(v) {
+      if (v == null) return L();
+      return `<span style="color:${chgColor(v)};">${chgSign(v)}${fmt(v)}%</span>`;
+    }
+
+    // Signal MAD: from perspective of a MAD-holding client wanting to buy foreign currency
+    // If foreign ccy is depreciating vs MAD → it's getting cheaper → FAVORABLE (good entry)
+    // If foreign ccy is appreciating vs MAD → it's getting expensive → COÛTEUX (wait)
+    function fxSignal(item) {
+      const vals = [item.chg, item.chg1w, item.chg1m, item.chg3m].filter(v => v != null);
+      if (vals.length < 2) return `<span style="color:#3d444d;font-size:10px;">—</span>`;
+      const pos = vals.filter(v => v >  0.05).length;
+      const neg = vals.filter(v => v < -0.05).length;
+      if (neg >= 3)
+        return `<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.4px;color:#00d4ff;background:rgba(0,212,255,0.10);border:1px solid rgba(0,212,255,0.35);">FAVORABLE ↓</span>`;
+      if (pos >= 3)
+        return `<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.4px;color:#ff6b35;background:rgba(255,107,53,0.10);border:1px solid rgba(255,107,53,0.35);">COÛTEUX ↑</span>`;
+      if (neg === 2 && pos <= 1)
+        return `<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.4px;color:#26d97f;background:rgba(38,217,127,0.08);border:1px solid rgba(38,217,127,0.30);">TENDANCE ↓</span>`;
+      if (pos === 2 && neg <= 1)
+        return `<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.4px;color:#f0a500;background:rgba(240,165,0,0.08);border:1px solid rgba(240,165,0,0.30);">TENDANCE ↑</span>`;
+      return `<span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.4px;color:#8b949e;background:rgba(139,148,158,0.08);border:1px solid rgba(139,148,158,0.25);">NEUTRE →</span>`;
+    }
+
+    function flashCell(cell) {
+      cell.classList.remove("flashed");
+      void cell.offsetWidth; // reflow
+      cell.classList.add("flashed");
+    }
+
+    function updateTableRow(row, item, tab) {
+      // Update numeric cells in-place and flash if value changed
+      const cells = row.querySelectorAll("td");
+      if (!cells.length) return;
+
+      if (tab === "indices") {
+        // cells: [name, cours, jour, 1sem, ytd, chart]
+        const prevLast = cells[1].dataset.val;
+        const newLast  = item.last == null ? "" : String(item.last);
+        cells[1].innerHTML = fmtLive(item.last, 2); cells[1].dataset.val = newLast;
+        cells[2].innerHTML = chgLive(item.chg);
+        cells[3].innerHTML = chgLive(item.chg1w);
+        cells[4].innerHTML = chgLive(item.chgY);
+        if (prevLast && prevLast !== newLast && item.last != null) flashCell(cells[1]);
+      } else if (tab === "forex") {
+        const prevLast = cells[1].dataset.val;
+        const newLast  = item.last == null ? "" : String(item.last);
+        cells[1].innerHTML = fmtLive(item.last, 4); cells[1].dataset.val = newLast;
+        cells[2].innerHTML = chgLive(item.chg);
+        cells[3].innerHTML = chgLive(item.chg1w);
+        cells[4].innerHTML = chgLive(item.chg1m);
+        cells[5].innerHTML = chgLive(item.chg3m);
+        cells[6].innerHTML = fxSignal(item);
+        if (prevLast && prevLast !== newLast && item.last != null) flashCell(cells[1]);
+      } else if (tab === "stocks") {
+        const prevLast = cells[1].dataset.val;
+        const newLast  = item.last == null ? "" : String(item.last);
+        const dec = item.last != null && item.last >= 1000 ? 0 : 2;
+        cells[1].innerHTML = fmtLive(item.last, dec); cells[1].dataset.val = newLast;
+        cells[2].innerHTML = chgLive(item.chg);
+        cells[3].innerHTML = chgLive(item.chgY);
+        if (prevLast && prevLast !== newLast && item.last != null) flashCell(cells[1]);
+      } else if (tab === "commodities") {
+        // cells: [name, cours, jour, 1sem, 1mois, unit, chart]
+        const prevLast = cells[1].dataset.val;
+        const newLast  = item.last == null ? "" : String(item.last);
+        const dec = item.last != null && item.last >= 100 ? 2 : 2;
+        cells[1].innerHTML = fmtLive(item.last, dec); cells[1].dataset.val = newLast;
+        cells[2].innerHTML = chgLive(item.chg);
+        cells[3].innerHTML = chgLive(item.chg1w);
+        cells[4].innerHTML = chgLive(item.chg1m);
+        // cells[5] = unit (static, set at build time); cells[6] = chart icon
+        if (prevLast && prevLast !== newLast && item.last != null) flashCell(cells[1]);
+      }
+    }
+
+    function renderTable(tab) {
+      const tbody = document.getElementById(tab + "-tbody");
+      if (!tbody) return;
+
+      const items = tab === "indices" ? data.indices
+                  : tab === "forex"  ? data.forex
+                  : tab === "stocks" ? data.stocks
+                  : data.commodities;
+
+      // First render: build structure (rows never rebuilt after this)
+      if (tbody.children.length !== items.length) {
+        tbody.innerHTML = "";
+        items.forEach(item => {
+          const row = document.createElement("tr");
+          row.dataset.sym = item.sym;
+          if (tab === "indices") {
+            row.innerHTML = `
+              <td><span style="display:flex;align-items:center;gap:8px;">
+                <span style="font-size:14px;font-weight:700;">[${item.flag}]</span>
+                <span style="font-weight:700;">${item.name}</span>
+              </span></td>
+              <td class="mono" data-val="">${L()}</td>
+              <td class="mono" style="text-align:right;" data-val="">${L()}</td>
+              <td class="mono" style="text-align:right;" data-val="">${L()}</td>
+              <td class="mono" style="text-align:right;" data-val="">${L()}</td>
+              <td style="text-align:center;"><span style="color:#00d4ff;font-size:11px;">▸</span></td>`;
+          } else if (tab === "forex") {
+            const fi = FOREX_ICON[item.sym];
+            const fxIcon = fi
+              ? `<span class="forex-icon" style="background:${fi.bg};color:${fi.fg};font-size:${fi.symbol.length>1?'11':'15'}px;">${fi.symbol}</span>`
+              : `<span class="forex-icon" style="background:#444;color:#fff;">${item.name.slice(0,1)}</span>`;
+            row.innerHTML = `
+              <td><span style="display:flex;align-items:center;gap:8px;">
+                ${fxIcon}
+                <span style="font-weight:700;">${item.name}</span>
+              </span></td>
+              <td class="mono" data-val="">${L()}</td>
+              <td class="mono" style="text-align:right;">${L()}</td>
+              <td class="mono" style="text-align:right;">${L()}</td>
+              <td class="mono" style="text-align:right;">${L()}</td>
+              <td class="mono" style="text-align:right;">${L()}</td>
+              <td style="text-align:center;">${L()}</td>`;
+          } else if (tab === "stocks") {
+            const logo = STOCK_LOGO[item.sym];
+            const badgeHtml = logo?.url
+              ? `<img class="stock-badge-img" src="${logo.url}" data-fb="${logo.fallback||''}" alt="${logo.label}" onerror="stockLogoErr(this);">`
+              : `<span class="stock-badge" style="background:${logo?.bg||'#444'};color:#fff;">${logo?.label||item.sym.replace('.CA','').slice(0,3)}</span>`;
+            row.innerHTML = `
+              <td><span style="display:flex;align-items:center;gap:10px;">
+                ${badgeHtml}
+                <span style="font-weight:600;">${item.name}</span>
+              </span></td>
+              <td class="mono" style="text-align:right;" data-val="">${L()}</td>
+              <td class="mono" style="text-align:right;" data-val="">${L()}</td>
+              <td class="mono" style="text-align:right;font-weight:700;" data-val="">${L()}</td>
+              <td style="text-align:center;"><span style="color:#00d4ff;font-size:11px;">▸</span></td>`;
+          } else {
+            const ci = COMMODITY_ICON[item.sym];
+            const cmdIcon = ci
+              ? `<img class="stock-badge-img" src="${ci.url}" alt="${item.name}" style="width:30px;height:30px;">`
+              : '';
+            row.innerHTML = `
+              <td><span style="display:flex;align-items:center;gap:8px;">
+                ${cmdIcon}
+                <span style="font-weight:600;">${item.name}</span>
+              </span></td>
+              <td class="mono" style="text-align:right;" data-val="">${L()}</td>
+              <td class="mono" style="text-align:right;" data-val="">${L()}</td>
+              <td class="mono" style="text-align:right;" data-val="">${L()}</td>
+              <td class="mono" style="text-align:right;" data-val="">${L()}</td>
+              <td style="text-align:right;color:#8b949e;font-size:11px;white-space:nowrap;">${item.unit || ""}</td>
+              <td style="text-align:center;"><span style="color:#00d4ff;font-size:11px;">▸</span></td>`;
+          }
+          row.style.cursor = "pointer";
+          row.onclick = () => openChart(item.sym);
+          tbody.appendChild(row);
+        });
+      }
+
+      // Always update values in-place (with flash if changed)
+      items.forEach(item => {
+        const row = tbody.querySelector(`tr[data-sym="${item.sym}"]`);
+        if (row) updateTableRow(row, item, tab);
+      });
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // BONDS CHARTS
+    // ════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════
+    // BDT YIELD CURVE CHART — rendered in Marchés tab
+    // Two curves: Aujourd'hui (cyan) vs Il y a 3 mois (amber dashed)
+    // ════════════════════════════════════════════════════════════════
+    let _bdtCurveChart = null;
+
+    function renderBDTCurveMarkets() {
+      // ── STEP 1: get elements ──
+      var srcEl = document.getElementById("bdt-curve-source");
+      var canvasEl = document.getElementById("bdt-markets-chart");
+
+      if (!canvasEl) { if (srcEl) srcEl.textContent = "ERR: canvas not found"; return; }
+      if (typeof Chart === "undefined") { if (srcEl) srcEl.textContent = "ERR: Chart.js not loaded"; return; }
+
+      // ── STEP 2: destroy old ──
+      if (_bdtCurveChart) { try { _bdtCurveChart.destroy(); } catch(e) {} _bdtCurveChart = null; }
+
+      // ── STEP 3: data ──
+      var labels = ["3M","6M","1A","5A","10A","20A"];
+      var keys6  = ["13W","26W","52W","5Y","10Y","20Y"];
+      var today  = [];
+      var ago3m  = [];
+
+      for (var i = 0; i < keys6.length; i++) {
+        var b = null;
+        for (var j = 0; j < BONDS.length; j++) {
+          if (BONDS[j].key === keys6[i]) { b = BONDS[j]; break; }
+        }
+        if (b) {
+          var rate = (b.rate != null) ? b.rate : b.ref;
+          today.push(Math.round(rate * 1000) / 1000);
+          var snap = window._bdtSnap3m;
+          var oldRate = (snap && snap[b.key]) ? snap[b.key] : b.ref3m;
+          ago3m.push(Math.round(oldRate * 1000) / 1000);
+        }
+      }
+
+      if (today.length === 0) { if (srcEl) srcEl.textContent = "ERR: BONDS data empty"; return; }
+
+      // ── STEP 4: source label ──
+      var avgT = 0, avgA = 0;
+      for (var i = 0; i < today.length; i++) { avgT += today[i]; avgA += ago3m[i]; }
+      avgT /= today.length; avgA /= ago3m.length;
+      var trend = avgT > avgA + 0.02 ? "↑ HAUSSIÈRE" : avgT < avgA - 0.02 ? "↓ BAISSIÈRE" : "→ Stable";
+      var tCol  = avgT > avgA + 0.02 ? "#ff4757"     : avgT < avgA - 0.02 ? "#00e676"      : "#8b949e";
+
+      var isLive = (_bdtLastSource || "").toLowerCase().indexOf("live") >= 0;
+      var now = new Date();
+      var d3  = new Date(); d3.setMonth(d3.getMonth() - 3);
+      var dateFmt = function(d) { return d.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"numeric"}); };
+      if (srcEl) {
+        srcEl.innerHTML = '<span style="color:' + tCol + ';font-weight:700;">' + trend + '</span>'
+          + ' &middot; ' + (isLive ? 'BAM live' : 'BAM réf. ' + dateFmt(now) + ' vs ' + dateFmt(d3));
+      }
+
+      // ── STEP 5: y-axis range ──
+      var allV = today.concat(ago3m);
+      var yMin = allV[0], yMax = allV[0];
+      for (var i = 1; i < allV.length; i++) {
+        if (allV[i] < yMin) yMin = allV[i];
+        if (allV[i] > yMax) yMax = allV[i];
+      }
+      yMin = Math.floor((yMin - 0.3) * 10) / 10;
+      yMax = Math.ceil((yMax + 0.3) * 10) / 10;
+
+      // ── STEP 6: create chart — SIMPLEST POSSIBLE CONFIG ──
+      _bdtCurveChart = new Chart(canvasEl, {
+        type: "line",
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: "Aujourd'hui",
+              data: today,
+              borderColor: "#00d4ff",
+              backgroundColor: "rgba(0,212,255,0.15)",
+              borderWidth: 2.5,
+              pointRadius: 5,
+              pointBackgroundColor: "#00d4ff",
+              pointBorderColor: "#0d1117",
+              pointBorderWidth: 2,
+              fill: true,
+              tension: 0.3
+            },
+            {
+              label: "Il y a 3 mois",
+              data: ago3m,
+              borderColor: "#f0a500",
+              borderWidth: 2,
+              borderDash: [6, 3],
+              pointRadius: 4,
+              pointBackgroundColor: "#f0a500",
+              pointBorderColor: "#0d1117",
+              pointBorderWidth: 2,
+              fill: false,
+              tension: 0.3
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: function(ctx) { return " " + ctx.dataset.label + " : " + ctx.parsed.y.toFixed(3) + "%"; }
+              }
+            }
+          },
+          scales: {
+            x: {
+              grid: { color: "rgba(0,212,255,0.07)" },
+              ticks: { color: "#8b949e", font: { size: 11 } }
+            },
+            y: {
+              min: yMin,
+              max: yMax,
+              grid: { color: "rgba(0,212,255,0.07)" },
+              ticks: {
+                color: "#8b949e",
+                font: { size: 10 },
+                callback: function(v) { return v.toFixed(2) + "%"; }
+              }
+            }
+          }
+        }
+      });
+
+      // ── STEP 7: dot ──
+      var dot = document.getElementById("bdt-curve-dot");
+      if (dot) dot.style.opacity = "1";
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // ÉMISSION vs SECONDAIRE — Comparison Chart
+    // Shows primary market auction rates vs secondary market reference
+    // Spread > 0 → PRESSION (Trésor paie + cher → taux montent)
+    // Spread ≤ 0 → DÉTENTE  (Trésor ne surenchérit pas → taux stables/baissent)
+    // ════════════════════════════════════════════════════════════════
+    let _emissionChart = null;
+
+    function renderEmissionVsSecondary() {
+      var canvasEl = document.getElementById("emission-vs-secondary-chart");
+      var srcEl    = document.getElementById("emission-curve-source");
+      var barEl    = document.getElementById("emission-spread-bar");
+      var analysisEl = document.getElementById("emission-analysis");
+
+      if (!canvasEl || typeof Chart === "undefined") return;
+      if (_emissionChart) { try { _emissionChart.destroy(); } catch(e) {} _emissionChart = null; }
+
+      // Collect data points — secondaire aujourd'hui vs secondaire -3 mois
+      var labels = [], secData = [], sec3mData = [], diffs = [], bondList = [];
+      var keys8 = ["13W","26W","52W","2Y","5Y","10Y","15Y","20Y"];
+
+      for (var i = 0; i < keys8.length; i++) {
+        var b = null;
+        for (var j = 0; j < BONDS.length; j++) {
+          if (BONDS[j].key === keys8[i]) { b = BONDS[j]; break; }
+        }
+        if (!b) continue;
+        var secRate = (b.rate != null) ? b.rate : b.ref;
+        if (secRate == null) continue;
+
+        labels.push(b.label);
+        secData.push(Math.round(secRate * 1000) / 1000);
+        sec3mData.push(b.ref3m != null ? Math.round(b.ref3m * 1000) / 1000 : null);
+        // Diff = taux aujourd'hui - taux il y a 3 mois (en %)
+        var ref3m = b.ref3m != null ? b.ref3m : secRate;
+        diffs.push(Math.round((secRate - ref3m) * 1000) / 1000);
+        bondList.push(b);
+      }
+
+      if (labels.length === 0) {
+        if (srcEl) srcEl.textContent = "Pas de données secondaire disponibles";
+        return;
+      }
+
+      // ── Variation indicator bar (aujourd'hui vs -3 mois) ──
+      if (barEl) {
+        var html = '';
+        for (var i = 0; i < labels.length; i++) {
+          var df = diffs[i];
+          var dfCol = df > 0.02 ? "#ff4757" : df < -0.02 ? "#00e676" : "#f0a500";
+          var dfIcon = df > 0.02 ? "▲" : df < -0.02 ? "▼" : "→";
+          var dfSign = df >= 0 ? "+" : "";
+          html += '<div style="background:rgba(255,255,255,0.03);border:1px solid ' + dfCol + '33;border-radius:6px;padding:4px 8px;text-align:center;min-width:70px;">'
+            + '<div style="font-size:9px;color:#8b949e;font-family:\'JetBrains Mono\',monospace;">' + labels[i] + '</div>'
+            + '<div style="font-size:12px;font-weight:700;color:' + dfCol + ';font-family:\'JetBrains Mono\',monospace;">' + dfIcon + ' ' + dfSign + (df*100).toFixed(1) + ' pbs</div>'
+            + '</div>';
+        }
+        barEl.innerHTML = html;
+      }
+
+      // ── Analysis text for private banker ──
+      if (analysisEl) {
+        var avgDiff = 0;
+        for (var i = 0; i < diffs.length; i++) avgDiff += diffs[i];
+        avgDiff /= diffs.length;
+
+        var upCount = 0, downCount = 0;
+        for (var i = 0; i < diffs.length; i++) {
+          if (diffs[i] > 0.02) upCount++;
+          else if (diffs[i] < -0.02) downCount++;
+        }
+
+        var verdict, verdictCol;
+        if (avgDiff > 0.03) {
+          verdict = "HAUSSE SUR 3 MOIS";
+          verdictCol = "#ff4757";
+        } else if (avgDiff < -0.03) {
+          verdict = "BAISSE SUR 3 MOIS";
+          verdictCol = "#00e676";
+        } else {
+          verdict = "STABLE SUR 3 MOIS";
+          verdictCol = "#f0a500";
+        }
+
+        analysisEl.innerHTML = '<span style="color:' + verdictCol + ';font-weight:700;font-size:12px;">' + verdict + '</span>'
+          + ' &middot; Variation moyenne : <span style="color:' + verdictCol + ';">' + (avgDiff >= 0 ? "+" : "") + (avgDiff * 100).toFixed(1) + ' pbs</span>'
+          + ' &middot; ' + upCount + ' en hausse, ' + downCount + ' en baisse';
+      }
+
+      // ── y-axis range ──
+      var allV = secData.concat(sec3mData.filter(function(v){ return v != null; }));
+      var yMin = allV[0], yMax = allV[0];
+      for (var i = 1; i < allV.length; i++) {
+        if (allV[i] < yMin) yMin = allV[i];
+        if (allV[i] > yMax) yMax = allV[i];
+      }
+      yMin = Math.floor((yMin - 0.3) * 10) / 10;
+      yMax = Math.ceil((yMax + 0.3) * 10) / 10;
+
+      // ── Source label ──
+      var hasLiveSec = BONDS.some(function(b) { return b.rate != null; });
+      if (srcEl) {
+        srcEl.innerHTML = 'Secondaire : ' + (hasLiveSec ? '<span style="color:#00e676;">BAM live</span>' : '<span style="color:#f0a500;">réf. statique (BAM)</span>')
+          + ' · Comparaison : -3 mois (réf. statique)';
+      }
+
+      // ── Chart (2 courbes : Secondaire auj + Secondaire -3 mois) ──
+      _emissionChart = new Chart(canvasEl, {
+        type: "line",
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: "Secondaire (BAM)",
+              data: secData,
+              borderColor: "#00d4ff",
+              backgroundColor: "rgba(0,212,255,0.08)",
+              borderWidth: 2.5,
+              pointRadius: 5,
+              pointBackgroundColor: "#00d4ff",
+              pointBorderColor: "#0d1117",
+              pointBorderWidth: 2,
+              fill: true,
+              tension: 0.3
+            },
+            {
+              label: "Secondaire il y a 3 mois",
+              data: sec3mData,
+              borderColor: "#f0a500",
+              borderWidth: 2,
+              borderDash: [6, 3],
+              pointRadius: 4,
+              pointBackgroundColor: "#f0a500",
+              pointBorderColor: "#0d1117",
+              pointBorderWidth: 2,
+              fill: false,
+              tension: 0.3
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                afterBody: function(items) {
+                  if (items.length < 2) return "";
+                  var sec  = items.find(function(i) { return i.datasetIndex === 0; });
+                  var sec3 = items.find(function(i) { return i.datasetIndex === 1; });
+                  if (sec && sec3 && sec3.parsed.y != null) {
+                    var diff = sec.parsed.y - sec3.parsed.y;
+                    var dir = diff > 0.02 ? "HAUSSE ↑" : diff < -0.02 ? "BAISSE ↓" : "STABLE →";
+                    return "\nVariation 3 mois : " + (diff >= 0 ? "+" : "") + (diff * 100).toFixed(1) + " pbs — " + dir;
+                  }
+                  return "";
+                },
+                label: function(ctx) { return " " + ctx.dataset.label + " : " + ctx.parsed.y.toFixed(3) + "%"; }
+              }
+            }
+          },
+          scales: {
+            x: {
+              grid: { color: "rgba(0,212,255,0.07)" },
+              ticks: { color: "#8b949e", font: { size: 11 } }
+            },
+            y: {
+              min: yMin,
+              max: yMax,
+              grid: { color: "rgba(0,212,255,0.07)" },
+              ticks: {
+                color: "#8b949e",
+                font: { size: 10 },
+                callback: function(v) { return v.toFixed(2) + "%"; }
+              }
+            }
+          }
+        }
+      });
+
+      // dot
+      var dot = document.getElementById("emission-curve-dot");
+      if (dot) dot.style.opacity = "1";
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // BDT TABLE — in Marchés tab
+    // ════════════════════════════════════════════════════════════════
+    function renderBDTMarketsTable() {
+      const tbody = document.getElementById("bdt-markets-tbody");
+      if (!tbody) return;
+      tbody.innerHTML = BONDS.map(b => {
+        const live = b.rate ?? b.ref;
+        const ref3 = window._bdtSnap3m?.[b.key] ?? b.ref3m;
+        const diff = +(live - ref3).toFixed(3);
+        const diffCol = diff > 0.005 ? "#ff4757" : diff < -0.005 ? "#00e676" : "#8b949e";
+        const diffStr = diff > 0.005 ? `▲ +${diff.toFixed(3)}` : diff < -0.005 ? `▼ ${diff.toFixed(3)}` : `= ${Math.abs(diff).toFixed(3)}`;
+        const isLive  = b.rate != null;
+        return `<tr>
+          <td style="font-weight:600;">${b.name}</td>
+          <td class="mono" style="text-align:right;color:#00d4ff;font-weight:700;">${live.toFixed(3)}%${isLive ? '' : '<span style="color:#3d444d;font-size:9px;"> réf</span>'}</td>
+          <td class="mono" style="text-align:right;color:${diffCol};font-size:11px;">${diffStr}</td>
+          <td style="text-align:right;color:#8b949e;font-size:11px;">${b.mat}</td>
+        </tr>`;
+      }).join("");
+
+      const src = document.getElementById("bdt-markets-source");
+      const isLiveSource = (_bdtLastSource||"").toLowerCase().includes("live");
+      const srcLabel = isLiveSource
+        ? `${_bdtLastSource} · MAJ ${new Date().toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})}`
+        : "BAM taux de référence — 06/04/2026";
+      if (src) src.textContent = "Source: " + srcLabel;
+      const dot = document.getElementById("bdt-table-dot");
+      if (dot) dot.style.opacity = isLiveSource ? "1" : "0.4";
+    }
+
+    function renderOPCVMMarketsTable() { /* no-op in public version */ }
+
+    // Save current BDT snapshot to localStorage for future "3 months ago" comparison
+    function saveBDTSnapshot() {
+      try {
+        const now = Date.now();
+        const liveRates = {};
+        BONDS.forEach(b => { if (b.rate != null) liveRates[b.key] = b.rate; });
+        if (Object.keys(liveRates).length === 0) return;
+
+        // Store rolling snapshots: keep one per month for the past 6 months
+        const stored = JSON.parse(localStorage.getItem("wv_bdt_history") || "[]");
+        const latest = stored[stored.length - 1];
+        // Add new snapshot if last one is older than 7 days
+        if (!latest || now - latest.ts > 7 * 24 * 3600 * 1000) {
+          stored.push({ ts: now, rates: liveRates });
+          if (stored.length > 12) stored.shift();  // keep at most 12 snapshots
+          localStorage.setItem("wv_bdt_history", JSON.stringify(stored));
+        }
+
+        // Load the snapshot closest to "3 months ago" as the comparison curve
+        const target3m = now - 90 * 24 * 3600 * 1000;
+        let best = null, bestDist = Infinity;
+        stored.forEach(snap => {
+          const dist = Math.abs(snap.ts - target3m);
+          if (dist < bestDist) { bestDist = dist; best = snap; }
+        });
+        // Use the historical snapshot only if it's at least 45 days old
+        if (best && (now - best.ts) > 45 * 24 * 3600 * 1000) {
+          window._bdtSnap3m = best.rates;
+        }
+      } catch {}
+    }
+
+    var _bondsChartInstance = null;
+    function renderBondsChart() {
+      const ctx = document.getElementById("bonds-chart");
+      if (!ctx || typeof Chart === "undefined") return;
+      const chartData = BONDS.map(b => b.rate != null ? b.rate : b.ref);
+
+      // Update in-place if chart exists
+      if (_bondsChartInstance) {
+        _bondsChartInstance.data.datasets[0].data = chartData;
+        _bondsChartInstance.update("none");
+        return;
+      }
+
+      // Don't create chart if canvas is hidden (0 dimensions) — wait for tab switch
+      if (ctx.offsetWidth === 0 || ctx.offsetHeight === 0) return;
+
+      _bondsChartInstance = new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels: BONDS.map(b => b.name.replace("BDT ", "")),
+          datasets: [{
+            label: "Taux %",
+            data: chartData,
+            backgroundColor: T.accent,
+            borderRadius: 6,
+            borderSkipped: false,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: "rgba(13,17,23,0.92)",
+              titleColor: "#e6edf3",
+              bodyColor: T.accent,
+              padding: 10,
+              borderColor: "rgba(0,212,255,0.3)",
+              borderWidth: 1,
+            },
+          },
+          scales: {
+            x: { grid: { color: "rgba(0,212,255,0.08)" }, ticks: { color: "#8b949e", font: { size: 10 } } },
+            y: { grid: { color: "rgba(0,212,255,0.08)" }, ticks: { color: "#8b949e", font: { size: 10 } }, max: 4.5 },
+          },
+        },
+      });
+    }
+
+    function renderOpcvmChart() { /* no-op in public version */ }
+
+    // ════════════════════════════════════════════════════════════════
+    // BONDS TABLE
+    // ════════════════════════════════════════════════════════════════
+    function renderBondsTable() {
+      // ── Bonds (BDT) table ──
+      const tbody = document.getElementById("bonds-tbody");
+      if (tbody) {
+        tbody.innerHTML = BONDS.map(b => {
+          const displayRate = b.rate ?? b.ref;
+          const chg = b.chg;
+          const chgColor_ = chg == null ? "#8b949e" : chg > 0.005 ? T.red : chg < -0.005 ? T.green : "#8b949e";
+          const chgArrow   = chg == null ? "—" : chg > 0.005 ? `▲ +${fmt(chg,3)}` : chg < -0.005 ? `▼ ${fmt(chg,3)}` : `= ${fmt(Math.abs(chg),3)}`;
+          return `<tr>
+            <td style="font-weight:600;">${b.name}</td>
+            <td class="mono" style="text-align:right;color:#00d4ff;font-weight:700;">${fmt(displayRate,3)}%</td>
+            <td class="mono" style="text-align:right;color:${chgColor_};font-size:11px;">${chgArrow}</td>
+            <td style="text-align:right;color:#8b949e;font-size:11px;">${b.mat}</td>
+          </tr>`;
+        }).join("");
+      }
+
+      // OPCVM (mutual funds) section removed in public version — no opcvm-tbody to render
+    }
+
+    // Generate a plausible 30-day history curve from performance figures (used when live data unavailable)
+    function generateRefHist(perf1, perfY) {
+      const pts = 30;
+      const monthlyReturn = (perf1 || 0) / 100;
+      const base = 1000;
+      return Array.from({length: pts}, (_, i) => {
+        const t = i / (pts - 1);
+        const noise = (Math.sin(i * 1.3) * 0.0015) + (Math.cos(i * 0.7) * 0.001);
+        return +(base * (1 + monthlyReturn * t + noise)).toFixed(4);
+      });
+    }
+
+    function drawSparkline(canvas, data, color) {
+      if (!data || data.length < 2) return;
+      const ctx = canvas.getContext("2d");
+      const W = canvas.width, H = canvas.height;
+      ctx.clearRect(0, 0, W, H);
+      const min = Math.min(...data), max = Math.max(...data);
+      const range = max - min || 1;
+      const pts = data.map((v, i) => ({
+        x: (i / (data.length - 1)) * (W - 2) + 1,
+        y: H - 2 - ((v - min) / range) * (H - 4),
+      }));
+      // Gradient fill
+      const grad = ctx.createLinearGradient(0, 0, 0, H);
+      grad.addColorStop(0, color + "55");
+      grad.addColorStop(1, color + "08");
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, H);
+      pts.forEach(p => ctx.lineTo(p.x, p.y));
+      ctx.lineTo(pts[pts.length-1].x, H);
+      ctx.closePath();
+      ctx.fillStyle = grad;
+      ctx.fill();
+      // Line
+      ctx.beginPath();
+      pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.lineJoin = "round";
+      ctx.stroke();
+    }
+
+    // (Section PROFILES supprimée — initProfiles, renderProfileSelector, etc.)
+
+    // ════════════════════════════════════════════════════════════════
+    // TAB NAVIGATION — placeholder pour ne pas casser le flow
+    // ════════════════════════════════════════════════════════════════
+    function initProfiles() { /* supprimé — section Profils Client retirée */ }
+
+    /* ── Dead profile code removed (renderProfileSelector, switchProfile, etc.) ── */
+    /* ── Profile functions removed (section Profils Client supprimée v2.0) ── */
+
+    // ════════════════════════════════════════════════════════════════
+    // TAB NAVIGATION
+    // ════════════════════════════════════════════════════════════════
+    document.querySelectorAll(".nav-btn").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
+        document.querySelectorAll(".section").forEach(s => s.classList.remove("active"));
+        e.target.classList.add("active");
+        const tab = e.target.getAttribute("data-tab");
+        document.getElementById(tab).classList.add("active");
+        currentTab = tab;
+
+        if (tab === "markets") {
+          ["indices","forex","stocks","commodities"].forEach(renderTable);
+          renderBDTMarketsTable();
+          renderOPCVMMarketsTable();
+          // 250ms : laisse le temps au layout CSS de peindre la section visible
+          setTimeout(renderBDTCurveMarkets, 250);
+        } else if (tab === "bonds") {
+          renderBondsTable();
+          setTimeout(() => { renderBondsChart(); renderOpcvmChart(); }, 100);
+          // Refresh live data when user navigates to this tab
+          fetchBourseMABonds();
+          fetchBourseMAOpcvm();
+        }
+      });
+    });
+
+    // ════════════════════════════════════════════════════════════════
+    // INITIAL RENDER
+    // ════════════════════════════════════════════════════════════════
+    ["indices","forex","stocks","commodities"].forEach(renderTable);
+    renderBondsTable();
+    // Load localStorage BDT snapshot for "3 months ago" comparison curve
+    try {
+      const hist = JSON.parse(localStorage.getItem("wv_bdt_history") || "[]");
+      const now = Date.now();
+      const target3m = now - 90 * 24 * 3600 * 1000;
+      let best = null, bestDist = Infinity;
+      hist.forEach(snap => { const d = Math.abs(snap.ts - target3m); if (d < bestDist) { bestDist = d; best = snap; } });
+      if (best && (now - best.ts) > 45 * 24 * 3600 * 1000) window._bdtSnap3m = best.rates;
+    } catch {}
+    renderBDTMarketsTable();
+    renderOPCVMMarketsTable();
+    // L'onglet "markets" est actif par défaut → rendu immédiat de la courbe BDT
+    setTimeout(function() {
+      try {
+        renderBDTCurveMarkets();
+      } catch(e) {
+        console.error("[BDT Chart init]", e);
+        var s = document.getElementById("bdt-curve-source");
+        if (s) s.textContent = "ERR init: " + e.message;
+      }
+      try {
+        renderEmissionVsSecondary();
+      } catch(e) {
+        console.error("[Emission Chart init]", e);
+      }
+    }, 200);
+  </script>
+</body>
+</html>
