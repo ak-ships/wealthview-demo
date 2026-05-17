@@ -1846,6 +1846,7 @@
       // Pass B — Futures scanner (COMEX:GC1!, NYMEX:BZ1!, COMEX:SI1!, CBOT:ZW1!)
       // Pour les commodities OANDA (or, pétrole, argent) : Perf.W / Perf.1M seulement (prix spot via Pass A)
       // Pour le Blé (CBOT:ZW1!) : prix + variation + Perf.W / Perf.1M (c'est la source principale)
+      // FALLBACK : si Pass A (OANDA) échoue à cause de CORS, on utilise les prix futures comme fallback
       if (cmdFuturesRows) {
         const hasOanda = new Set(
           data.commodities.filter(c => TV_MAP[c.sym]?.startsWith("OANDA:")).map(c => c.sym)
@@ -1856,7 +1857,8 @@
           const entry = data.commodities.find(e => e.sym === internalSym);
           if (!entry) return;
           // Blé et toute commodity sans OANDA : écrire prix + variation journalière depuis le futures
-          if (!hasOanda.has(internalSym) && row.d[0] != null) {
+          // OU commodities OANDA si Pass A a échoué (entry.last toujours null)
+          if (row.d[0] != null && (!hasOanda.has(internalSym) || entry.last == null)) {
             entry.last = row.d[0];
             entry.chg  = row.d[1] != null ? +row.d[1].toFixed(2) : entry.chg;
           }
@@ -2683,10 +2685,13 @@
       if (_bdtCurveChart) { try { _bdtCurveChart.destroy(); } catch(e) {} _bdtCurveChart = null; }
 
       // ── STEP 3: data ──
+      // MARCHÉ PRIMAIRE (Adjudications BAM) : utilise emission (today) et emission3m (-3m)
+      // Source: résultats adjudications Bank Al-Maghrib publiés sur bkam.ma + médias financiers
       var labels = ["3M","6M","1A","5A","10A","20A"];
       var keys6  = ["13W","26W","52W","5Y","10Y","20Y"];
-      var today  = [];
-      var ago3m  = [];
+      var todayRaw = [];
+      var ago3mRaw = [];
+      var validLabels = [];
 
       for (var i = 0; i < keys6.length; i++) {
         var b = null;
@@ -2694,13 +2699,21 @@
           if (BONDS[j].key === keys6[i]) { b = BONDS[j]; break; }
         }
         if (b) {
-          var rate = (b.rate != null) ? b.rate : b.ref;
-          today.push(Math.round(rate * 1000) / 1000);
-          var snap = window._bdtSnap3m;
-          var oldRate = (snap && snap[b.key]) ? snap[b.key] : b.ref3m;
-          ago3m.push(Math.round(oldRate * 1000) / 1000);
+          // PRIMAIRE : emissionLive (live BAM) > emission (référence)
+          var pRate = (b.emissionLive != null) ? b.emissionLive : b.emission;
+          var pRate3m = b.emission3m;
+          // Skip maturities sans data primaire (ex: 6M qui n'a pas d'émission régulière)
+          if (pRate != null && pRate3m != null) {
+            todayRaw.push(Math.round(pRate * 1000) / 1000);
+            ago3mRaw.push(Math.round(pRate3m * 1000) / 1000);
+            validLabels.push(labels[i]);
+          }
         }
       }
+
+      var today = todayRaw;
+      var ago3m = ago3mRaw;
+      labels = validLabels;
 
       if (today.length === 0) { if (srcEl) srcEl.textContent = "ERR: BONDS data empty"; return; }
 
@@ -2717,7 +2730,7 @@
       var dateFmt = function(d) { return d.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"numeric"}); };
       if (srcEl) {
         srcEl.innerHTML = '<span style="color:' + tCol + ';font-weight:700;">' + trend + '</span>'
-          + ' &middot; ' + (isLive ? 'BAM live' : 'BAM réf. ' + dateFmt(now) + ' vs ' + dateFmt(d3));
+          + ' &middot; Primaire ' + (isLive ? '(BAM live)' : '(BAM adj. réf. ' + dateFmt(now) + ' vs ' + dateFmt(d3) + ')');
       }
 
       // ── STEP 5: y-axis range ──
@@ -2737,7 +2750,7 @@
           labels: labels,
           datasets: [
             {
-              label: "Aujourd'hui",
+              label: "Primaire — Aujourd'hui",
               data: today,
               borderColor: "#00d4ff",
               backgroundColor: "rgba(0,212,255,0.15)",
@@ -2750,7 +2763,7 @@
               tension: 0.3
             },
             {
-              label: "Il y a 3 mois",
+              label: "Primaire — Il y a 3 mois",
               data: ago3m,
               borderColor: "#f0a500",
               borderWidth: 2,
