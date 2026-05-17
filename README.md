@@ -4,7 +4,7 @@ A real-time dashboard for Moroccan financial markets. It's one HTML file. No bac
 
 I built this because every dashboard I tried for Moroccan markets was either outdated, slow, or required a paid Bloomberg-like subscription. So I rolled my own.
 
-**Live demo:** _(GitHub Pages URL will go here once published)_
+**Live demo:** https://ak-ships.github.io/wealthview-demo/
 
 ![WealthView screenshot, Marchés tab](docs/screenshot-markets.png)
 
