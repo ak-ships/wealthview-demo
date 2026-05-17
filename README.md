@@ -64,7 +64,7 @@ The whole app is one 3,200-line `index.html`. No `npm install`, no transpilation
 
 **Windows**
 ```
-Lancer-WealthView.bat    (double-click)
+start.bat    (double-click)
 ```
 
 **Linux**
@@ -79,14 +79,6 @@ python3 -m http.server 8080
 ```
 
 All the launcher scripts do is bootstrap a local Python `http.server` and open the browser for you.
-
-## Deploy to GitHub Pages
-
-1. Push this repo to GitHub.
-2. Settings, then Pages, then Source: `main` branch / `(root)` folder, then Save.
-3. Wait about 60 seconds. The dashboard is live at `https://<username>.github.io/<repo>/`.
-
-No build config needed.
 
 ## Public version vs. full version
 
